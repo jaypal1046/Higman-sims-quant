@@ -310,6 +310,10 @@ Named tuple holding:
 - improve the residual stage
 - compare against a closer reproduction of the official TurboQuant paper if a paper-level claim is needed
 
+## Public Release Checklist
+
+If you are deciding whether to make the repository public, use [docs/PUBLIC_RELEASE_CHECKLIST.md](docs/PUBLIC_RELEASE_CHECKLIST.md).
+
 ## Legal
 
 - License: [LICENSE](LICENSE)
