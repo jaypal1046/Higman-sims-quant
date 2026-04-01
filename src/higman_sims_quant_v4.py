@@ -5,8 +5,8 @@ Built from diagnostic findings, not theory.
 
 What the diagnostics proved
 ---------------------------
-1.  HS at 22D beats TQ on IP distortion at equal bits (7 bits: HS ip_dist=3.6,
-    TQ ip_dist=206).  HS's sphere packing is genuinely superior in 22D.
+1.  In local diagnostics, HS at 22D showed lower IP distortion than the
+    scalar TQ-style baseline at equal bits for this setup.
 
 2.  At 1.5 bpd in 22D, HS and TQ are TIED on recall@10 (0.159 each), but
     HS wins on IP distortion (27.9 vs 43.7).

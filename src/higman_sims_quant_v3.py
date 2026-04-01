@@ -1,7 +1,7 @@
 """
 Higman-Sims Implicit Spectral Quantizer — v3
 =============================================
-Improvements over v2 targeting Google TurboQuant's own metrics:
+Exploratory improvements over v2, aimed at metrics that are relevant to TurboQuant-style evaluation:
 
   1. Equal-bitrate mode (2.00 bits/dim)
      Drop bits_norm to 0 and bits_residual to 1 to hit 2.00 bits/dim,

@@ -1,84 +1,85 @@
 """
-Higman-Sims Quantizer — v7 (Definitive Beat)
-=============================================
+Higman-Sims Quantizer — v7 (Research Prototype)
+===============================================
 
 ROOT CAUSE OF v6 FAILURE
--------------------------
-v6 used E8 by finding nearest vertex in *absolute* space: argmax(x @ E8.T).
-This forces all chunks onto the E8 sphere (radius=1), meaning chunks with
-large norms are badly approximated (the coarse always has norm=1).
+------------------------
+v6 quantized raw chunks directly in absolute space:
+    argmax(chunk @ E8.T)
 
-The fix is *norm-split* encoding:
-  1. Extract per-chunk norm n = ‖chunk‖
-  2. Find nearest E8 unit vertex to the unit vector chunk/n
-  3. Coarse approximation = E8[id] * n  (correct magnitude)
-  4. Residual = chunk - coarse  (smaller, better quantized)
+That forces each coarse approximation onto the E8 sphere, so large-norm chunks
+are reconstructed with the wrong magnitude. The result is a large quality drop
+at higher dimensions.
 
-v6's failure modes at 768D:
-  SNR vs TQ at 2.0 bpd:  −0.59 dB  (v6 LOSES to TurboQuant)
-  SNR vs TQ at 2.0 bpd:  +10.0 dB  (v7 WINS with norm-split)
+v7 fixes this with norm-split encoding:
+  1. Compute the chunk norm n = ||chunk||
+  2. Normalize the chunk to unit length
+  3. Quantize direction with the nearest E8 vertex
+  4. Reconstruct the coarse signal using a quantized norm
+  5. Quantize the residual with a second E8 stage
+
+In the in-repo Gaussian benchmark, v6's failure mode at 768D was:
+  SNR vs local TQ-style 2.0 bpd baseline: -0.59 dB
 
 V7 ARCHITECTURE
 ---------------
-  Stage 1 (1.0 bpd):
-    8D chunks. Unit-normalise each chunk.
-    Find nearest E8 vertex on unit sphere → 8-bit ID.
-    Coarse = E8[id] × chunk_norm.
-    Overhead: 0 bits (E8 is analytically determined, no transmission).
+  Stage 1:
+    Split the vector into 8D chunks.
+    Unit-normalize each chunk.
+    Quantize chunk direction with one E8 vertex ID.
+    Reconstruct the coarse chunk using a quantized norm.
 
-  Stage 2 (1.0 bpd):
-    Compute residual = chunk - stage1_coarse.
-    Unit-normalise residual.
-    Find nearest E8 vertex on unit sphere → 8-bit ID.
-    Fine approx = E8[id2] × residual_norm.
-    Total: 2 × 8 = 16 bits for 8D = 2.0 bpd exactly. Zero scalar residual needed.
+  Stage 2:
+    Compute the residual after stage 1.
+    Unit-normalize the residual.
+    Quantize residual direction with a second E8 vertex ID.
+    Reconstruct the fine correction using a second quantized norm.
 
-  Optional Stage 3 (0+ bpd):
-    Quantize remaining residual with b bits/dim (global scale, fitted).
-    Total: (16 + 8b) / 8 = 2 + b bpd.
+  Optional tail stage:
+    Quantize any remaining residual with b bits/dim.
 
   Alternative modes:
-    'hs':  22D chunks, 100 HS vertices (tight spherical 3-design, Golay-derived)
-    'e8x1': single-level E8 + 1-bit residual (2.0 bpd, slightly worse than E8x2)
-    'e8x2': two-level E8, no scalar tail (2.0 bpd, best at all dims)
-    'e8x2r': two-level E8 + 1-bit scalar tail (3.0 bpd, matches TQ@3bpd+5dB)
+    'hs':    22D chunks, 100 HS vertices (tight spherical 3-design, Golay-derived)
+    'e8x1':  single-level E8 plus scalar residual
+    'e8x2':  two-level E8, quality-first mode
+    'e8x2r': two-level E8 plus scalar residual tail
 
-BENCHMARKED RESULTS (v7 vs TurboQuant @ matched 2.0 bpd, Gaussian data)
--------------------------------------------------------------------------
-  dim=8:    v7 E8x2 = +11.2 dB over TQ
-  dim=22:   v7 E8x2 = +10.5 dB over TQ
-  dim=64:   v7 E8x2 = +10.2 dB over TQ
-  dim=128:  v7 E8x2 = +10.1 dB over TQ
-  dim=768:  v7 E8x2 = +10.0 dB over TQ
-  dim=4096: v7 E8x2 = +9.8 dB over TQ
+BITRATE ACCOUNTING NOTE
+-----------------------
+Two E8 IDs contribute 16 bits per 8D chunk, which is 2.0 bpd for the IDs alone.
+Exact reconstruction also requires transmitting quantized norm information.
+
+So in the current implementation:
+  - default e8x2 is a higher-bitrate quality-first codec
+  - default e8x2r is higher still
+  - neither should be described as a matched-bitrate win over Google TurboQuant
+
+BENCHMARK STATUS
+----------------
+On the in-repo Gaussian benchmark, v7 improves reconstruction quality over the
+local scalar TQ-style baseline. That result is real for this setup, but it is
+not the same as a validated win over Google's published TurboQuant system.
 
 MATHEMATICAL FOUNDATION
 -----------------------
-  E8 is the unique root system in 8D with kissing number 240 (Viazovska 2017,
-  Fields Medal 2022 for proving E8 is the densest sphere packing in 8D).
-  Its 240 minimal vectors form a spherical 7-design — the strongest uniformity
-  guarantee possible in 8D.
+E8 is the unique root system in 8D with kissing number 240. Its minimal vectors
+form a highly uniform spherical configuration, which makes E8 a strong codebook
+for direction quantization.
 
-  The norm-split insight: the E8 sphere is optimal for *direction* quantization
-  (unit vectors). By separating magnitude from direction, we use E8 for exactly
-  what it is optimal for.
+The main v7 insight is to use E8 for what it is naturally good at:
+quantizing unit-direction structure, while handling magnitude separately.
 
-  Two-level E8: the first E8 snap gives a direction residual that lives in the
-  same unit-sphere geometry. A second E8 snap on the scaled residual gives a
-  second 8-bit ID for free — no extra structure needed.
-
-  Zero overhead: E8 is specified by two closed-form families of vectors
-  (integer ±e_i ± e_j and half-integer with even sign count).
-  Both encoder and decoder recompute it in O(256) time. No transmission needed.
+The E8 codebook itself has no transmission cost because encoder and decoder can
+recompute it analytically from its closed-form construction.
 
 USAGE
 -----
     from higman_sims_quant_v7 import HybridV7, build_e8_codebook, run_benchmark
 
-    qz = HybridV7(dim=768, mode='e8x2')     # 2-level E8, 2.0 bpd
-    qz.fit(X_train)                          # fit residual scale (one call, ~50ms)
-    cv  = qz.encode(X_test)                  # CompressedV7
-    X_hat = qz.decode(cv)                    # (N, dim) reconstruction
+    qz = HybridV7(dim=768, mode='e8x2')     # quality-first two-stage E8 mode
+    qz.fit(X_train)                         # fit norm ranges / residual scale
+    cv = qz.encode(X_test)                  # CompressedV7
+    X_hat = qz.decode(cv)                   # (N, dim) reconstruction
 
     # Run full benchmark suite
     python higman_sims_quant_v7.py
@@ -603,7 +604,8 @@ class V7Engine:
     This is the primary benchmark engine.
     """
 
-    def __init__(self, dim: int, bits_tail: int = 0, codebook: Optional[np.ndarray] = None):
+    def __init__(self, dim: int, bits_tail: int = 0, codebook: Optional[np.ndarray] = None,
+                 norm_bits: int = 8):
         if codebook is None:
             codebook = build_e8_codebook()
         self.CB = codebook.astype(np.float64)
@@ -611,11 +613,15 @@ class V7Engine:
         self.ID_BITS = int(np.ceil(np.log2(self.K)))
         self.dim = dim
         self.bits_tail = bits_tail
+        self.norm_bits = norm_bits
         self.n_chunks = int(np.ceil(dim / self.D))
         self.padded = self.n_chunks * self.D
         self.CBT = self.CB.T.copy()
         self._tail_scale = 1.0
         self._score_batch_rows = 65536
+        self._norm_eps = 1e-12
+        self._norm1_log_range = (-12.0, 12.0)
+        self._norm2_log_range = (-12.0, 12.0)
 
     def _nearest_ids(self, vectors: np.ndarray) -> np.ndarray:
         """
@@ -631,23 +637,62 @@ class V7Engine:
             ids[start:end] = np.argmax(scores, axis=1).astype(np.uint16)
         return ids
 
+    def _fit_log_range(self, values: np.ndarray) -> Tuple[float, float]:
+        safe = np.maximum(np.asarray(values, dtype=np.float64), self._norm_eps)
+        logs = np.log2(safe)
+        lo = float(np.percentile(logs, 0.5))
+        hi = float(np.percentile(logs, 99.5))
+        if not np.isfinite(lo):
+            lo = -12.0
+        if not np.isfinite(hi):
+            hi = 12.0
+        if hi <= lo + 1e-6:
+            hi = lo + 1e-6
+        return lo, hi
+
+    def _quantize_norms(self, values: np.ndarray, log_range: Tuple[float, float]) -> np.ndarray:
+        if self.norm_bits <= 0:
+            return np.zeros(np.asarray(values).shape, dtype=np.uint8)
+        lo, hi = log_range
+        levels = (1 << self.norm_bits) - 1
+        safe = np.maximum(np.asarray(values, dtype=np.float64), self._norm_eps)
+        logs = np.log2(safe)
+        scaled = (np.clip(logs, lo, hi) - lo) / (hi - lo)
+        return np.round(scaled * levels).astype(np.uint8)
+
+    def _dequantize_norms(self, codes: np.ndarray, log_range: Tuple[float, float]) -> np.ndarray:
+        if self.norm_bits <= 0:
+            return np.ones(np.asarray(codes).shape, dtype=np.float64)
+        lo, hi = log_range
+        levels = (1 << self.norm_bits) - 1
+        logs = lo + (np.asarray(codes, dtype=np.float64) / levels) * (hi - lo)
+        return np.exp2(logs)
+
     def fit(self, X_train: np.ndarray):
-        """Fit tail scale from training data."""
-        if self.bits_tail == 0:
-            return
+        """Fit norm-code ranges and tail scale from training data."""
         Xp = self._pad(X_train)
         flat = Xp.reshape(-1, self.D)
-        n1 = np.linalg.norm(flat, axis=1, keepdims=True)
-        s1 = np.where(n1 < 1e-12, 1.0, n1)
+
+        n1 = np.linalg.norm(flat, axis=1)
+        self._norm1_log_range = self._fit_log_range(n1)
+        s1 = np.where(n1[:, None] < 1e-12, 1.0, n1[:, None])
         ids1 = self._nearest_ids(flat / s1)
-        c1 = self.CB[ids1] * s1.squeeze()[:, None]
+        n1_q = self._quantize_norms(n1, self._norm1_log_range)
+        n1_hat = self._dequantize_norms(n1_q, self._norm1_log_range)
+        c1 = self.CB[ids1] * n1_hat[:, None]
         r1 = flat - c1
-        n2 = np.linalg.norm(r1, axis=1, keepdims=True)
-        s2 = np.where(n2 < 1e-12, 1.0, n2)
+
+        n2 = np.linalg.norm(r1, axis=1)
+        self._norm2_log_range = self._fit_log_range(n2)
+        s2 = np.where(n2[:, None] < 1e-12, 1.0, n2[:, None])
         ids2 = self._nearest_ids(r1 / s2)
-        c2 = self.CB[ids2] * s2.squeeze()[:, None]
+        n2_q = self._quantize_norms(n2, self._norm2_log_range)
+        n2_hat = self._dequantize_norms(n2_q, self._norm2_log_range)
+        c2 = self.CB[ids2] * n2_hat[:, None]
         r2 = r1 - c2
-        self._tail_scale = max(float(np.percentile(np.abs(r2), 99)) * 2.0, 1e-8)
+
+        if self.bits_tail > 0:
+            self._tail_scale = max(float(np.percentile(np.abs(r2), 99)) * 2.0, 1e-8)
 
     def encode(self, X: np.ndarray) -> dict:
         """(N, dim) → dict with all fields needed for exact decode."""
@@ -657,17 +702,21 @@ class V7Engine:
         flat = Xp.reshape(N * self.n_chunks, self.D)
 
         # Stage 1
-        n1 = np.linalg.norm(flat, axis=1, keepdims=True)
-        s1 = np.where(n1 < 1e-12, 1.0, n1)
+        n1 = np.linalg.norm(flat, axis=1)
+        s1 = np.where(n1[:, None] < 1e-12, 1.0, n1[:, None])
         ids1 = self._nearest_ids(flat / s1)
-        c1 = self.CB[ids1] * s1.squeeze()[:, None]
+        norms1_q = self._quantize_norms(n1, self._norm1_log_range)
+        norms1_hat = self._dequantize_norms(norms1_q, self._norm1_log_range)
+        c1 = self.CB[ids1] * norms1_hat[:, None]
         r1 = flat - c1
 
         # Stage 2
-        n2 = np.linalg.norm(r1, axis=1, keepdims=True)
-        s2 = np.where(n2 < 1e-12, 1.0, n2)
+        n2 = np.linalg.norm(r1, axis=1)
+        s2 = np.where(n2[:, None] < 1e-12, 1.0, n2[:, None])
         ids2 = self._nearest_ids(r1 / s2)
-        c2 = self.CB[ids2] * s2.squeeze()[:, None]
+        norms2_q = self._quantize_norms(n2, self._norm2_log_range)
+        norms2_hat = self._dequantize_norms(norms2_q, self._norm2_log_range)
+        c2 = self.CB[ids2] * norms2_hat[:, None]
         r2 = r1 - c2
 
         # Stage 3 (optional scalar tail)
@@ -684,8 +733,8 @@ class V7Engine:
             'ids1':      ids1.reshape(N, self.n_chunks),
             'ids2':      ids2.reshape(N, self.n_chunks),
             'tail':      tail.reshape(N, self.n_chunks, self.D),
-            'norms1':    s1.reshape(N, self.n_chunks).astype(np.float32),  # chunk norms
-            'norms2':    s2.reshape(N, self.n_chunks).astype(np.float32),  # residual norms
+            'norms1_q':  norms1_q.reshape(N, self.n_chunks),
+            'norms2_q':  norms2_q.reshape(N, self.n_chunks),
             'dim':       self.dim,
             'n':         N,
         }
@@ -696,8 +745,8 @@ class V7Engine:
         ids1   = enc['ids1'].reshape(-1)
         ids2   = enc['ids2'].reshape(-1)
         tail   = enc['tail'].reshape(-1, self.D)
-        norms1 = enc['norms1'].reshape(-1).astype(np.float64)
-        norms2 = enc['norms2'].reshape(-1).astype(np.float64)
+        norms1 = self._dequantize_norms(enc['norms1_q'].reshape(-1), self._norm1_log_range)
+        norms2 = self._dequantize_norms(enc['norms2_q'].reshape(-1), self._norm2_log_range)
 
         c1 = self.CB[ids1] * norms1[:, None]   # exact stage-1 approx
         c2 = self.CB[ids2] * norms2[:, None]   # exact stage-2 approx
@@ -712,12 +761,7 @@ class V7Engine:
         return recon.reshape(N, self.padded)[:, :self.dim]
 
     def bits_per_vector(self) -> int:
-        # IDs: 2 * ID_BITS bits per chunk
-        # Norms: stored as float32 (32 bits each) — this IS overhead if transmitted.
-        # For zero-overhead comparison, note that the norms could be quantized to
-        # 8 bits each (log-uniform) adding 16 bits per chunk instead of 64.
-        # For fair bpd comparison we count only the ID + residual bits:
-        return self.n_chunks * (2 * self.ID_BITS + self.D * self.bits_tail)
+        return self.n_chunks * (2 * self.ID_BITS + 2 * self.norm_bits + self.D * self.bits_tail)
 
     def bits_per_dim(self) -> float:
         return self.bits_per_vector() / self.dim
@@ -817,7 +861,7 @@ def run_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42):
     qv7.fit(X_tr)
     t0 = time.perf_counter(); ev7 = qv7.encode(X_te); te7 = time.perf_counter()-t0
     t0 = time.perf_counter(); Rv7 = qv7.decode(ev7);  td7 = time.perf_counter()-t0
-    methods['v7'] = dict(label='v7 E8x2   2.0bpd', bpd=qv7.bits_per_dim(),
+    methods['v7'] = dict(label=f'v7 E8x2   {qv7.bits_per_dim():.3f}bpd', bpd=qv7.bits_per_dim(),
                          X_hat=Rv7, enc=te7, dec=td7)
 
     # ── v7 E8×2 + 1-bit tail @ 3.0 bpd ────────────────────────────────────────
@@ -825,7 +869,7 @@ def run_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42):
     qv7r.fit(X_tr)
     t0 = time.perf_counter(); ev7r = qv7r.encode(X_te); te7r = time.perf_counter()-t0
     t0 = time.perf_counter(); Rv7r = qv7r.decode(ev7r); td7r = time.perf_counter()-t0
-    methods['v7r'] = dict(label='v7 E8x2r  3.0bpd', bpd=qv7r.bits_per_dim(),
+    methods['v7r'] = dict(label=f'v7 E8x2r  {qv7r.bits_per_dim():.3f}bpd', bpd=qv7r.bits_per_dim(),
                           X_hat=Rv7r, enc=te7r, dec=td7r)
 
     # ── v6 E8 @ 2.0 bpd (absolute-space, for comparison) ─────────────────────
@@ -841,13 +885,13 @@ def run_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42):
     t0 = time.perf_counter()
     Rtq2 = turbo_decode(c2, lo2, sc2, 2)
     td_tq2 = time.perf_counter()-t0
-    methods['tq2'] = dict(label='TurboQuant 2.0bpd', bpd=2.0,
+    methods['tq2'] = dict(label='TQ-style  2.0bpd', bpd=2.0,
                           X_hat=Rtq2, enc=te_tq2, dec=td_tq2)
 
     # ── TurboQuant @ 3 bpd ────────────────────────────────────────────────────
     c3, lo3, sc3 = turbo_encode(X_te, 3)
     Rtq3 = turbo_decode(c3, lo3, sc3, 3)
-    methods['tq3'] = dict(label='TurboQuant 3.0bpd', bpd=3.0,
+    methods['tq3'] = dict(label='TQ-style  3.0bpd', bpd=3.0,
                           X_hat=Rtq3, enc=te_tq2, dec=td_tq2)
 
     # ── Print table ────────────────────────────────────────────────────────────
@@ -862,7 +906,7 @@ def run_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42):
     print(f"\n{sep}\n{hdr}\n{sep}")
     _row("bpd",               lambda m: f"{m['bpd']:.3f}")
     _row("Compression ratio", lambda m: f"{(dim*32)/(m['bpd']*dim):.2f}x")
-    _row("Overhead (bits)",   lambda _: "0")
+    _row("Codebook overhead", lambda _: "0")
     _row("SNR (dB)",          lambda m: f"{snr_db(X_te, m['X_hat']):.2f} dB")
     _row("Cosine similarity", lambda m: f"{cosine_sim(X_te, m['X_hat']):.4f}")
     _row("Recall@10",         lambda m: f"{recall_at_k(X_te, m['X_hat']):.4f}")
@@ -876,19 +920,19 @@ def run_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42):
     v7r_snr = snr_db(X_te, Rv7r)
     v6_snr  = snr_db(X_te, Rv6)
 
-    print(f"\n  v7 E8x2  vs TQ @ 2.0 bpd : {v7_snr - tq2_snr:+.2f} dB   [matched bitrate]")
-    print(f"  v7 E8x2r vs TQ @ 3.0 bpd : {v7r_snr - tq3_snr:+.2f} dB   [matched bitrate]")
-    print(f"  v7 E8x2  vs v6 @ 2.0 bpd : {v7_snr - v6_snr:+.2f} dB   [arch improvement]")
-    print(f"  {'WIN' if v7_snr > tq2_snr else 'LOSS'} at {dim}D @ 2.0 bpd")
+    print(f"\n  v7 E8x2  ({qv7.bits_per_dim():.3f} bpd) vs local TQ-style baseline (2.0 bpd) : {v7_snr - tq2_snr:+.2f} dB")
+    print(f"  v7 E8x2r ({qv7r.bits_per_dim():.3f} bpd) vs local TQ-style baseline (3.0 bpd) : {v7r_snr - tq3_snr:+.2f} dB")
+    print(f"  v7 E8x2  ({qv7.bits_per_dim():.3f} bpd) vs v6 (2.0 bpd) : {v7_snr - v6_snr:+.2f} dB   [arch improvement]")
+    print(f"  {'SNR lead' if v7_snr > tq2_snr else 'SNR trail'} at {dim}D with honest bitrate accounting")
 
 
 def compare_all_dims():
-    """Summary table: v7 E8x2 vs TurboQuant at 2.0 bpd across all dimensions."""
+    """Summary table with honest bitrate accounting for v7 E8x2 vs a local TQ-style baseline."""
     print("\n" + "═"*72)
-    print("  v7 E8x2 vs TurboQuant @ matched 2.0 bpd — all dimensions")
+    print("  v7 E8x2 vs local TQ-style baseline — honest bitrate accounting")
     print("═"*72)
-    print(f"  {'dim':>6} | {'TQ SNR':>10} | {'v7 SNR':>10} | {'Gain':>8} | {'Result':>8}")
-    print("  " + "─"*60)
+    print(f"  {'dim':>6} | {'v7 bpd':>8} | {'TQ SNR':>10} | {'v7 SNR':>10} | {'Gain':>8} | {'Result':>10}")
+    print("  " + "─"*72)
 
     E8 = build_e8_codebook()
     rng = np.random.default_rng(99)
@@ -908,8 +952,8 @@ def compare_all_dims():
         v7_snr = snr_db(X_te, qv7.decode(enc))
 
         gain = v7_snr - tq_snr
-        tag  = "v7 WIN ✓" if gain > 0 else "TQ  win "
-        print(f"  {dim:>6} | {tq_snr:>10.2f} | {v7_snr:>10.2f} | {gain:>+8.2f} | {tag:>8}")
+        tag  = "v7 SNR lead" if gain > 0 else "TQ SNR lead"
+        print(f"  {dim:>6} | {qv7.bits_per_dim():>8.3f} | {tq_snr:>10.2f} | {v7_snr:>10.2f} | {gain:>+8.2f} | {tag:>10}")
 
     print("═"*72)
 
@@ -920,6 +964,7 @@ def benchmark_o1_decode():
     E8 = build_e8_codebook()
     qz = V7Engine(dim=768, bits_tail=0, codebook=E8)
     rng = np.random.default_rng(0)
+    qz.fit(rng.standard_normal((2048, 768)))
     for n in [1, 10, 100, 1_000, 10_000, 100_000]:
         x = rng.standard_normal((n, 768))
         enc = qz.encode(x)
@@ -938,7 +983,7 @@ if __name__ == "__main__":
     print(f"\n  E8 codebook: {build_e8_codebook().shape}  (provably optimal 8D packing, Viazovska 2017)")
     print(f"  HS codebook: (100, 22)  (tight spherical 3-design from Golay code)")
     print(f"\n  KEY FIX vs v6: norm-split encoding (quantize direction, not raw vector)")
-    print(f"  Expected gain over TurboQuant @ 2.0 bpd: +10 dB at all dimensions")
+    print(f"  Norm payload is now counted explicitly in the reported bits/dim")
 
     benchmark_o1_decode()
     compare_all_dims()

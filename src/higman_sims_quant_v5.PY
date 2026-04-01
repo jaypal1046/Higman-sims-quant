@@ -9,7 +9,7 @@ All 5 critical fixes integrated:
 4. McLaughlin graph for higher bitrates
 5. GPU-optimized batch operations
 
-Beats TurboQuant on ALL metrics: speed, SNR, recall, compression ratio.
+Historical experiment note: the benchmark claims in this file were later invalidated by implementation and accounting issues.
 """
 
 import numpy as np

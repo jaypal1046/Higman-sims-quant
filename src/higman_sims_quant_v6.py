@@ -1,6 +1,6 @@
 """
-Higman-Sims Quantizer — v6 (Definitive)
-========================================
+Higman-Sims Quantizer — v6 (Reference Prototype)
+================================================
 
 ROOT CAUSE ANALYSIS OF v5 FAILURES
 ------------------------------------
@@ -29,7 +29,7 @@ V6 ARCHITECTURE
 ---------------
   Core insight: Use the E8 lattice (NOT HS) as the coarse codebook.
 
-  Why E8 wins over HS:
+  Why E8 was explored instead of HS:
     - E8 is the PROVABLY OPTIMAL sphere packing in 8D (Viazovska 2017, Fields Medal)
     - HS is an optimal spherical 3-design in 22D (good, but weaker guarantee)
     - E8: 240 points in 8D, 8 bits/ID, 1.0 bits/dim overhead
@@ -37,7 +37,7 @@ V6 ARCHITECTURE
     - E8 8D chunks break less correlation than HS 22D chunks
     - E8 + 1 bit/dim residual = exactly 2.0 bpd (TurboQuant target)
 
-  Verified improvement: +3.5 dB SNR over TurboQuant at ALL dimensions.
+  Historical benchmark note: earlier SNR claims in this file were based on a local baseline and were superseded by later bitrate-accounting fixes.
 
   HS is retained as an alternative codebook (selectable via graph='hs').
   At 2.5 bpd budget, HS+2bit_residual shows +2.2 dB over TQ.
@@ -292,7 +292,7 @@ class CompressedV6(NamedTuple):
 
 class HybridV6:
     """
-    Definitive hybrid quantizer — pure numpy/scipy, no torch, zero overhead.
+    Reference hybrid quantizer — pure numpy/scipy, no torch.
 
     Architecture:
       1. Pad input to multiple of chunk_D
@@ -653,7 +653,7 @@ def compare_all_graphs():
 
 
 if __name__ == "__main__":
-    print("Higman-Sims Quantizer v6 — Definitive")
+    print("Higman-Sims Quantizer v6 — Reference Prototype")
     print("=" * 68)
     print("\nCodebooks:")
     print(f"  E8 lattice: {build_e8_codebook().shape}  (proven optimal in 8D, Viazovska 2017)")
