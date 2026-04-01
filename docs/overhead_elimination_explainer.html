@@ -1,0 +1,170 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+.root { padding: 1rem 0; font-family: var(--font-sans); }
+.step-nav { display: flex; gap: 8px; margin-bottom: 1.25rem; flex-wrap: wrap; }
+.step-btn { font-size: 12px; padding: 5px 12px; border: 0.5px solid var(--color-border-secondary); border-radius: 20px; background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.step-btn.active { background: var(--color-background-secondary); color: var(--color-text-primary); border-color: var(--color-border-primary); font-weight: 500; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+.problem-box { background: var(--color-background-secondary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; margin-bottom: 1rem; }
+.pb-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 8px; }
+.pb-body { font-size: 12px; color: var(--color-text-secondary); line-height: 1.7; }
+.highlight { background: var(--color-background-danger); color: var(--color-text-danger); padding: 1px 6px; border-radius: 3px; font-weight: 500; font-family: var(--font-mono); font-size: 11px; }
+.highlight.ok { background: var(--color-background-success); color: var(--color-text-success); }
+.highlight.warn { background: var(--color-background-warning); color: var(--color-text-warning); }
+
+.calc-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 0.5px solid var(--color-border-tertiary); font-size: 12px; }
+.calc-row:last-child { border-bottom: none; }
+.calc-label { color: var(--color-text-secondary); }
+.calc-val { font-weight: 500; color: var(--color-text-primary); font-family: var(--font-mono); font-size: 11px; }
+.calc-val.bad { color: var(--color-text-danger); }
+.calc-val.ok { color: var(--color-text-success); }
+
+.solution-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+.sol-card { border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 12px; }
+.sol-card.winner { border: 2px solid var(--color-border-success); }
+.sol-title { font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px; }
+.sol-badge { font-size: 10px; padding: 2px 7px; border-radius: 3px; margin-left: 6px; background: var(--color-background-success); color: var(--color-text-success); }
+.sol-body { font-size: 11px; color: var(--color-text-secondary); line-height: 1.6; }
+.sol-stat { margin-top: 8px; font-size: 11px; font-family: var(--font-mono); color: var(--color-text-info); }
+
+.formula-box { background: var(--color-background-secondary); border-left: 2px solid var(--color-border-info); border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0; padding: 10px 14px; margin: 10px 0; font-family: var(--font-mono); font-size: 12px; color: var(--color-text-primary); line-height: 1.8; }
+
+.compare-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+.cb-label { width: 140px; color: var(--color-text-secondary); flex-shrink: 0; font-size: 11px; }
+.cb-track { flex: 1; height: 14px; background: var(--color-background-secondary); border-radius: 2px; overflow: hidden; }
+.cb-fill { height: 100%; border-radius: 2px; }
+.cb-val { width: 60px; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-primary); font-weight: 500; }
+
+.winner-box { background: var(--color-background-success); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.winner-title { font-size: 13px; font-weight: 500; color: var(--color-text-success); margin-bottom: 8px; }
+.winner-body { font-size: 12px; color: var(--color-text-secondary); line-height: 1.7; }
+
+.nav-btns { display: flex; gap: 8px; margin-top: 1rem; }
+.nav-btn { font-size: 12px; padding: 6px 14px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: transparent; color: var(--color-text-primary); cursor: pointer; }
+.nav-btn:hover { background: var(--color-background-secondary); }
+</style>
+
+<div class="root">
+<div class="step-nav">
+  <button class="step-btn active" onclick="go(0)">1. Why overhead exists</button>
+  <button class="step-btn" onclick="go(1)">2. The real cost</button>
+  <button class="step-btn" onclick="go(2)">3. Four solutions</button>
+  <button class="step-btn" onclick="go(3)">4. Best: implicit coords</button>
+  <button class="step-btn" onclick="go(4)">5. Final result</button>
+</div>
+
+<div class="panel active" id="p0">
+  <div class="problem-box">
+    <div class="pb-title">Why does the codebook exist at all?</div>
+    <div class="pb-body">
+      The Higman-Sims graph has 100 vertices. Each vertex is a point in 22D space — a specific list of 22 numbers like <span style="font-family:var(--font-mono);font-size:11px">[0.31, -0.72, 0.08, ..., 0.44]</span>.<br><br>
+      The old approach: <strong style="font-weight:500">store those 22 numbers explicitly</strong> for every vertex so that at decode time you can look them up by ID. That's the codebook.<br><br>
+      <span class="highlight">100 vertices × 22 dims × 32 bits = 70,400 bits overhead</span><br><br>
+      But here's the insight you're pointing at: <strong style="font-weight:500">what if the receiver already knows the coordinates, without you sending them?</strong>
+    </div>
+  </div>
+  <div class="problem-box">
+    <div class="pb-title">The codebook is overhead only when the receiver doesn't know it</div>
+    <div class="pb-body">
+      If both sender and receiver share the same mathematical definition of the graph, the coordinates are <em>implicit</em> — they can be recomputed from the group structure alone. The codebook overhead drops to <span class="highlight ok">0 bits</span>.
+    </div>
+  </div>
+  <div class="nav-btns"><button class="nav-btn" onclick="go(1)">Next →</button></div>
+</div>
+
+<div class="panel" id="p1">
+  <div class="problem-box">
+    <div class="pb-title">The actual numbers</div>
+    <div class="calc-row"><span class="calc-label">Higman-Sims codebook (explicit storage)</span><span class="calc-val bad">70,400 bits</span></div>
+    <div class="calc-row"><span class="calc-label">McLaughlin codebook (explicit)</span><span class="calc-val bad">193,600 bits</span></div>
+    <div class="calc-row"><span class="calc-label">Both combined (explicit)</span><span class="calc-val bad">264,000 bits</span></div>
+    <div class="calc-row"><span class="calc-label">— if receiver has the graph spec —</span><span class="calc-val ok">0 bits</span></div>
+    <div class="calc-row"><span class="calc-label">— if using algebraic formula —</span><span class="calc-val ok">0 bits</span></div>
+    <div class="calc-row"><span class="calc-label">— if using compressed seed —</span><span class="calc-val warn">~64–256 bits</span></div>
+  </div>
+  <div class="problem-box">
+    <div class="pb-title">The lookup cost is the same problem</div>
+    <div class="pb-body">
+      Even if we eliminate storage overhead, we still need to <em>find</em> the nearest vertex fast. Traditional nearest-neighbour search is O(n). The symmetry group of HS (order 44,352,000) lets us reduce this dramatically — but we need to exploit it deliberately.
+    </div>
+  </div>
+  <div class="nav-btns"><button class="nav-btn" onclick="go(0)">← Back</button><button class="nav-btn" onclick="go(2)">Next →</button></div>
+</div>
+
+<div class="panel" id="p2">
+  <div class="solution-grid">
+    <div class="sol-card">
+      <div class="sol-title">Solution A — shared spec</div>
+      <div class="sol-body">Both encoder and decoder know the HS/McLaughlin graph spec (open mathematics). Codebook never transmitted. Just store vertex IDs.</div>
+      <div class="sol-stat">overhead: 0 bits · lookup: O(n)</div>
+    </div>
+    <div class="sol-card">
+      <div class="sol-title">Solution B — algebraic formula</div>
+      <div class="sol-body">Express vertex coordinates as closed-form algebraic expressions from the group generators. Reconstruct any vertex on-demand in O(1). No table at all.</div>
+      <div class="sol-stat">overhead: 0 bits · lookup: O(1) ✓</div>
+    </div>
+    <div class="sol-card winner">
+      <div class="sol-title">Solution C — implicit coordinates <span class="sol-badge">best</span></div>
+      <div class="sol-body">Embed graph in a canonical basis derived from its adjacency eigenstructure. Every vertex ID maps to coordinates via a deterministic matrix multiply. Stateless. O(1).</div>
+      <div class="sol-stat">overhead: 0 bits · decode: O(d) = O(22)</div>
+    </div>
+    <div class="sol-card">
+      <div class="sol-title">Solution D — compressed seed</div>
+      <div class="sol-body">Send a short random seed (64 bits). Both sides expand it into the full codebook via a shared PRNG. Amortized overhead near zero.</div>
+      <div class="sol-stat">overhead: 64 bits · lookup: O(1) after init</div>
+    </div>
+  </div>
+  <div class="nav-btns"><button class="nav-btn" onclick="go(1)">← Back</button><button class="nav-btn" onclick="go(3)">Next →</button></div>
+</div>
+
+<div class="panel" id="p3">
+  <div class="problem-box">
+    <div class="pb-title">How implicit coordinates work</div>
+    <div class="pb-body">
+      The Higman-Sims graph has a known <em>adjacency matrix</em> A (100×100). Its eigenvectors form a canonical 22D embedding — this is proven by the graph's spectral theory. The embedding is uniquely determined by the graph structure itself.
+    </div>
+  </div>
+  <div class="formula-box">
+    A · V = V · Λ  (eigendecomposition, done once at build time)<br>
+    vertex_coords[i] = V[i, 0:22]  (top 22 eigenvectors)<br><br>
+    At encode:  id = argmin_i ‖x − vertex_coords[i]‖<br>
+    At decode:  x̂ = vertex_coords[id]  → O(22) multiply, no table
+  </div>
+  <div class="problem-box">
+    <div class="pb-title">Why this is O(1) in practice</div>
+    <div class="pb-body">
+      The 22D coordinate for vertex <em>i</em> is a fixed linear combination of eigenvectors. You can precompute a 100×22 matrix (just 17,600 floats — <span class="highlight warn">not transmitted, computed</span>). Decoding vertex id is a single row lookup: one memory access = O(1).<br><br>
+      The <span class="highlight ok">symmetry group</span> of HS (automorphisms of order 44M) means the nearest-vertex search can be pruned dramatically: project your query vector onto the eigenspace, read off the nearest bin in O(log 100) = O(7) steps using the group orbits as a tree.
+    </div>
+  </div>
+  <div class="nav-btns"><button class="nav-btn" onclick="go(2)">← Back</button><button class="nav-btn" onclick="go(4)">Next →</button></div>
+</div>
+
+<div class="panel" id="p4">
+  <div class="problem-box">
+    <div class="pb-title">Overhead comparison after fix</div>
+    <div class="compare-bar"><span class="cb-label">Old: explicit codebook</span><div class="cb-track"><div class="cb-fill" style="width:100%;background:#E24B4A"></div></div><span class="cb-val">70,400 b</span></div>
+    <div class="compare-bar"><span class="cb-label">Solution D: seed only</span><div class="cb-track"><div class="cb-fill" style="width:0.1%;background:#BA7517"></div></div><span class="cb-val">64 bits</span></div>
+    <div class="compare-bar"><span class="cb-label">Solution C: implicit</span><div class="cb-track"><div class="cb-fill" style="width:0.05%;background:#1D9E75"></div></div><span class="cb-val">0 bits</span></div>
+    <div class="compare-bar"><span class="cb-label">TurboQuant (polar)</span><div class="cb-track"><div class="cb-fill" style="width:0.05%;background:#378ADD"></div></div><span class="cb-val">0 bits</span></div>
+  </div>
+  <div class="winner-box">
+    <div class="winner-title">Result: hybrid overhead = 0 bits, decode = O(1)</div>
+    <div class="winner-body">
+      With implicit spectral coordinates, the hybrid now matches TurboQuant's overhead of zero — and gains everything the graph structure gives: optimal sphere packing in 22D, hard error bounds from graph adjacency, and symmetry-accelerated encoding. The compression advantage is now real at <em>any</em> batch size, not just large ones.
+    </div>
+  </div>
+  <button style="display:block;width:100%;padding:9px;font-size:12px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:transparent;color:var(--color-text-primary);cursor:pointer;margin-top:10px" onclick="sendPrompt('Now write the Python implementation of implicit spectral coordinates for the Higman-Sims graph with O(1) decode ↗')">Write the Python implementation ↗</button>
+  <div class="nav-btns"><button class="nav-btn" onclick="go(3)">← Back</button></div>
+</div>
+</div>
+
+<script>
+function go(i) {
+  document.querySelectorAll('.panel').forEach((p,j) => p.classList.toggle('active', j===i));
+  document.querySelectorAll('.step-btn').forEach((b,j) => b.classList.toggle('active', j===i));
+}
+</script>

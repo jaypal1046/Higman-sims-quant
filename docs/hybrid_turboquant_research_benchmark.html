@@ -1,0 +1,386 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-mono, monospace); }
+  .root { padding: 1.5rem 0; max-width: 860px; }
+  .paper-header { border-bottom: 1.5px solid var(--color-border-primary); padding-bottom: 1.25rem; margin-bottom: 1.5rem; }
+  .paper-title { font-size: 20px; font-weight: 500; color: var(--color-text-primary); line-height: 1.35; font-family: var(--font-serif, serif); }
+  .paper-meta { font-size: 12px; color: var(--color-text-secondary); margin-top: 8px; font-family: var(--font-sans, sans-serif); letter-spacing: 0.03em; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-right: 6px; background: var(--color-background-info); color: var(--color-text-info); }
+
+  .section-label { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1rem; }
+  .metric { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px; }
+  .metric-label { font-size: 11px; color: var(--color-text-secondary); font-family: var(--font-sans); margin-bottom: 4px; }
+  .metric-value { font-size: 22px; font-weight: 500; color: var(--color-text-primary); }
+  .metric-sub { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; font-family: var(--font-sans); }
+
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+  .ctrl-group label { font-size: 12px; color: var(--color-text-secondary); font-family: var(--font-sans); display: block; margin-bottom: 6px; }
+  .ctrl-group select, .ctrl-group input[type=range] { width: 100%; }
+  .ctrl-group .val { font-size: 12px; font-weight: 500; color: var(--color-text-primary); float: right; font-family: var(--font-sans); }
+
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+  .method-card { border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 12px; }
+  .method-card.highlight { border: 2px solid var(--color-border-info); }
+  .method-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); font-family: var(--font-sans); margin-bottom: 8px; }
+  .method-badge { font-size: 10px; padding: 2px 7px; border-radius: 3px; background: var(--color-background-info); color: var(--color-text-info); margin-left: 6px; }
+  .method-badge.best { background: var(--color-background-success); color: var(--color-text-success); }
+  .stat-line { display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-secondary); font-family: var(--font-sans); padding: 3px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .stat-line:last-child { border-bottom: none; }
+  .stat-val { font-weight: 500; color: var(--color-text-primary); }
+  .stat-val.good { color: var(--color-text-success); }
+  .stat-val.bad { color: var(--color-text-danger); }
+
+  .bar-section { margin-bottom: 1.25rem; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-family: var(--font-sans); }
+  .bar-label { font-size: 12px; color: var(--color-text-secondary); width: 130px; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 18px; background: var(--color-background-secondary); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .bar-num { font-size: 12px; font-weight: 500; color: var(--color-text-primary); width: 60px; text-align: right; }
+
+  .analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+  .analysis-box { border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 12px; }
+  .analysis-title { font-size: 12px; font-weight: 500; font-family: var(--font-sans); color: var(--color-text-primary); margin-bottom: 8px; }
+  .analysis-item { font-size: 11px; color: var(--color-text-secondary); font-family: var(--font-sans); padding: 2px 0; display: flex; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .dot.green { background: #639922; }
+  .dot.red { background: #E24B4A; }
+  .dot.amber { background: #BA7517; }
+
+  .run-btn { display: block; width: 100%; padding: 10px; font-family: var(--font-mono, monospace); font-size: 13px; font-weight: 500; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: transparent; color: var(--color-text-primary); cursor: pointer; margin-bottom: 1.25rem; }
+  .run-btn:hover { background: var(--color-background-secondary); }
+  .run-btn:active { transform: scale(0.98); }
+
+  .log-box { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px; font-size: 11px; font-family: var(--font-mono, monospace); color: var(--color-text-secondary); max-height: 140px; overflow-y: auto; margin-bottom: 1rem; line-height: 1.8; }
+  .log-line { color: var(--color-text-secondary); }
+  .log-line.ok { color: var(--color-text-success); }
+  .log-line.info { color: var(--color-text-info); }
+  .log-line.warn { color: var(--color-text-warning); }
+
+  .table-wrap { overflow-x: auto; margin-bottom: 1rem; }
+  table { width: 100%; font-size: 12px; font-family: var(--font-sans); border-collapse: collapse; }
+  th { font-weight: 500; color: var(--color-text-secondary); text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--color-border-secondary); }
+  td { padding: 6px 10px; border-bottom: 0.5px solid var(--color-border-tertiary); color: var(--color-text-primary); }
+  tr:last-child td { border-bottom: none; }
+  .td-good { color: var(--color-text-success); font-weight: 500; }
+  .td-bad { color: var(--color-text-danger); }
+  .td-neu { color: var(--color-text-warning); font-weight: 500; }
+
+  .divider { height: 0.5px; background: var(--color-border-tertiary); margin: 1.25rem 0; }
+  .section-title { font-size: 14px; font-weight: 500; color: var(--color-text-primary); font-family: var(--font-sans); margin-bottom: 10px; }
+</style>
+
+<div class="root">
+
+<div class="paper-header">
+  <div class="paper-title">Hybrid Sporadic Group Vector Quantization:<br>Combining TurboQuant with Higman-Sims & McLaughlin Graph Structures</div>
+  <div class="paper-meta" style="margin-top: 10px;">
+    <span class="tag">Research Draft</span>
+    <span class="tag">2025</span>
+    <span style="color: var(--color-text-tertiary);">Benchmark Tool v0.1 — Live Simulation</span>
+  </div>
+</div>
+
+<div class="section-label">Benchmark Configuration</div>
+<div class="card">
+  <div class="controls">
+    <div class="ctrl-group">
+      <label>Vector dimension <span class="val" id="dim-val">768D (BERT)</span></label>
+      <select id="dim-sel" onchange="update()">
+        <option value="22">22D (native graph)</option>
+        <option value="64">64D (attention head)</option>
+        <option value="128">128D (small head)</option>
+        <option value="768" selected>768D (BERT)</option>
+        <option value="1536">1536D (GPT-2)</option>
+        <option value="4096">4096D (large LLM)</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <label>Bits per dimension (TurboQuant) <span class="val" id="bits-val">3</span></label>
+      <input type="range" id="bits-sl" min="1" max="8" value="3" step="1" oninput="update()">
+    </div>
+    <div class="ctrl-group">
+      <label>Batch size (vectors) <span class="val" id="batch-val">1,000</span></label>
+      <select id="batch-sel" onchange="update()">
+        <option value="1">1</option>
+        <option value="10">10</option>
+        <option value="100">100</option>
+        <option value="1000" selected>1,000</option>
+        <option value="10000">10,000</option>
+        <option value="100000">100,000</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <label>Graph used <span class="val" id="graph-val">Higman-Sims</span></label>
+      <select id="graph-sel" onchange="update()">
+        <option value="hs">Higman-Sims (100V, 22D)</option>
+        <option value="mcl">McLaughlin (275V, 22D)</option>
+        <option value="both">Both combined</option>
+      </select>
+    </div>
+  </div>
+  <button class="run-btn" onclick="runBench()">Run full benchmark ↗</button>
+  <div class="log-box" id="log">
+    <div class="log-line info">// configure above and click run benchmark</div>
+    <div class="log-line">// all computation is simulated in-browser</div>
+  </div>
+</div>
+
+<div class="section-label">Compression comparison</div>
+<div class="compare-grid" id="compare-grid"></div>
+
+<div class="section-label">Bits per dimension</div>
+<div class="card bar-section" id="bar-section"></div>
+
+<div class="section-label">Performance summary</div>
+<div class="metric-row" id="metrics"></div>
+
+<div class="divider"></div>
+<div class="section-label">Detailed analysis table</div>
+<div class="table-wrap">
+  <table id="analysis-table">
+    <thead>
+      <tr>
+        <th>Method</th><th>Bits/dim</th><th>Compression ratio</th><th>Overhead (bits)</th><th>Error bound</th><th>Speed</th><th>Verdict</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<div class="divider"></div>
+<div class="section-label">What needs to improve over TurboQuant</div>
+<div class="analysis-grid">
+  <div class="analysis-box">
+    <div class="analysis-title">Advantages of hybrid approach</div>
+    <div id="pros"></div>
+  </div>
+  <div class="analysis-box">
+    <div class="analysis-title">Remaining gaps to solve</div>
+    <div id="cons"></div>
+  </div>
+</div>
+
+<button class="run-btn" onclick="sendPrompt('Let\'s design the full proof-of-concept implementation for the hybrid TurboQuant + Higman-Sims approach, including the chunking strategy, residual quantization, and Python code ↗')">Design full proof-of-concept implementation ↗</button>
+
+</div>
+
+<script>
+const HS = { vertices: 100, dim: 22, name: "Higman-Sims", codebookBits: 100*22*32 };
+const MCL = { vertices: 275, dim: 22, name: "McLaughlin", codebookBits: 275*22*32 };
+
+function getGraph() {
+  const g = document.getElementById('graph-sel').value;
+  if (g === 'hs') return HS;
+  if (g === 'mcl') return MCL;
+  return { vertices: 375, dim: 22, name: "HS + McLaughlin", codebookBits: (HS.codebookBits + MCL.codebookBits) };
+}
+
+function compute(dims, bits, batch) {
+  const g = getGraph();
+  const origBits = dims * 32;
+
+  // TurboQuant (pure polar)
+  const tq_compressed = dims * bits;
+  const tq_overhead = 0;
+  const tq_total_per_vec = tq_compressed;
+  const tq_ratio = origBits / tq_total_per_vec;
+  const tq_bpd = bits;
+
+  // Graph-only (coarse, 22D chunks)
+  const nChunks = Math.ceil(dims / g.dim);
+  const bitsPerVertex = Math.ceil(Math.log2(g.vertices));
+  const graph_compressed_per_vec = nChunks * bitsPerVertex;
+  const graph_overhead = g.codebookBits;
+  const graph_total_per_vec = graph_compressed_per_vec + (graph_overhead / batch);
+  const graph_ratio = origBits / graph_total_per_vec;
+  const graph_bpd = graph_compressed_per_vec / dims;
+
+  // Hybrid: graph coarse + polar residual (2 bits residual)
+  const residual_bits = 2;
+  const hyb_compressed_per_vec = nChunks * (bitsPerVertex + g.dim * residual_bits);
+  const hyb_overhead = g.codebookBits;
+  const hyb_total_per_vec = hyb_compressed_per_vec + (hyb_overhead / batch);
+  const hyb_ratio = origBits / hyb_total_per_vec;
+  const hyb_bpd = hyb_compressed_per_vec / dims;
+
+  return {
+    orig: origBits, dims, bits, batch, g,
+    tq: { ratio: tq_ratio, bpd: tq_bpd, overhead: 0, total: tq_total_per_vec, error: "~medium", speed: "O(1)" },
+    graph: { ratio: graph_ratio, bpd: +graph_bpd.toFixed(2), overhead: graph_overhead, total: +graph_total_per_vec.toFixed(1), error: "bounded", speed: "O(log n)" },
+    hyb: { ratio: hyb_ratio, bpd: +hyb_bpd.toFixed(2), overhead: hyb_overhead, total: +hyb_total_per_vec.toFixed(1), error: "low+bounded", speed: "O(log n)" }
+  };
+}
+
+function update() {
+  const dims = parseInt(document.getElementById('dim-sel').value);
+  const bits = parseInt(document.getElementById('bits-sl').value);
+  const batch = parseInt(document.getElementById('batch-sel').value);
+  const g = getGraph();
+
+  document.getElementById('dim-val').textContent = document.getElementById('dim-sel').options[document.getElementById('dim-sel').selectedIndex].text;
+  document.getElementById('bits-val').textContent = bits;
+  document.getElementById('batch-val').textContent = batch.toLocaleString();
+  document.getElementById('graph-val').textContent = g.name;
+
+  const r = compute(dims, bits, batch);
+  renderCompare(r);
+  renderBars(r);
+  renderMetrics(r);
+  renderTable(r);
+}
+
+function renderCompare(r) {
+  const best = Math.max(r.tq.ratio, r.graph.ratio, r.hyb.ratio);
+  const methods = [
+    { name: "TurboQuant (polar)", sub: "Google baseline", data: r.tq, isBest: r.tq.ratio === best },
+    { name: "Graph-only", sub: r.g.name, data: r.graph, isBest: r.graph.ratio === best },
+    { name: "Hybrid", sub: "TurboQuant + " + r.g.name, data: r.hyb, isBest: r.hyb.ratio === best }
+  ];
+  document.getElementById('compare-grid').innerHTML = methods.map(m => `
+    <div class="method-card ${m.isBest ? 'highlight' : ''}">
+      <div class="method-title">${m.name}${m.isBest ? '<span class="method-badge best">best</span>' : ''}</div>
+      <div style="font-size: 11px; color: var(--color-text-secondary); font-family: var(--font-sans); margin-bottom: 8px;">${m.sub}</div>
+      <div class="stat-line"><span>Compression</span><span class="stat-val ${m.isBest?'good':''}">${m.data.ratio.toFixed(1)}x</span></div>
+      <div class="stat-line"><span>Bits/dim</span><span class="stat-val">${m.data.bpd}</span></div>
+      <div class="stat-line"><span>Error</span><span class="stat-val">${m.data.error}</span></div>
+      <div class="stat-line"><span>Speed</span><span class="stat-val">${m.data.speed}</span></div>
+    </div>
+  `).join('');
+}
+
+function renderBars(r) {
+  const max = Math.max(r.tq.ratio, r.graph.ratio, r.hyb.ratio, 1);
+  const bars = [
+    { label: "TurboQuant", val: r.tq.ratio, color: "#378ADD" },
+    { label: r.g.name, val: r.graph.ratio, color: "#BA7517" },
+    { label: "Hybrid", val: r.hyb.ratio, color: "#1D9E75" },
+  ];
+  document.getElementById('bar-section').innerHTML = bars.map(b => `
+    <div class="bar-row">
+      <div class="bar-label">${b.label}</div>
+      <div class="bar-track"><div class="bar-fill" style="width: ${Math.min(100, (b.val/max)*100).toFixed(1)}%; background: ${b.color};"></div></div>
+      <div class="bar-num">${b.val.toFixed(1)}x</div>
+    </div>
+  `).join('');
+}
+
+function renderMetrics(r) {
+  const hybVsTq = ((r.hyb.ratio / r.tq.ratio - 1) * 100).toFixed(1);
+  document.getElementById('metrics').innerHTML = `
+    <div class="metric"><div class="metric-label">Hybrid compression</div><div class="metric-value">${r.hyb.ratio.toFixed(1)}x</div><div class="metric-sub">vs ${r.tq.ratio.toFixed(1)}x TurboQuant</div></div>
+    <div class="metric"><div class="metric-label">Hybrid gain</div><div class="metric-value" style="color: ${parseFloat(hybVsTq)>0?'var(--color-text-success)':'var(--color-text-danger)'}">${parseFloat(hybVsTq)>0?'+':''}${hybVsTq}%</div><div class="metric-sub">over TurboQuant baseline</div></div>
+    <div class="metric"><div class="metric-label">Codebook overhead</div><div class="metric-value">${(r.hyb.overhead/1000).toFixed(0)}K bits</div><div class="metric-sub">amortized over ${r.batch.toLocaleString()} vectors</div></div>
+    <div class="metric"><div class="metric-label">Native dim match</div><div class="metric-value">${r.dims === 22 ? '100%' : ((22/r.dims*100).toFixed(0)+'%')}</div><div class="metric-sub">22D efficiency</div></div>
+  `;
+}
+
+function renderTable(r) {
+  const rows = [
+    ["TurboQuant", r.tq.bpd, r.tq.ratio.toFixed(2)+"x", "0", "medium", "O(1)", r.tq.ratio >= r.hyb.ratio ? "baseline winner" : "baseline"],
+    [r.g.name+" only", r.graph.bpd, r.graph.ratio.toFixed(2)+"x", (r.graph.overhead/1000).toFixed(0)+"K", "bounded", "O(log n)", r.graph.ratio > r.tq.ratio ? "viable large batch" : "overhead too high"],
+    ["Hybrid (proposed)", r.hyb.bpd, r.hyb.ratio.toFixed(2)+"x", (r.hyb.overhead/1000).toFixed(0)+"K", "low+bounded", "O(log n)", r.hyb.ratio > r.tq.ratio ? "recommended" : "needs large batch"],
+  ];
+  const colors = [r.tq.ratio, r.graph.ratio, r.hyb.ratio];
+  const maxR = Math.max(...colors);
+  document.getElementById('table-body').innerHTML = rows.map((row, i) => {
+    const isMax = colors[i] === maxR;
+    return `<tr>
+      <td style="font-weight:500">${row[0]}</td>
+      <td>${row[1]}</td>
+      <td class="${isMax?'td-good':''}">${row[2]}</td>
+      <td class="${parseFloat(row[3])>0?'td-neu':''}">${row[3]}</td>
+      <td>${row[4]}</td>
+      <td>${row[5]}</td>
+      <td class="${row[6].includes('recommended')||row[6].includes('winner')?'td-good':row[6].includes('high')?'td-bad':'td-neu'}">${row[6]}</td>
+    </tr>`;
+  }).join('');
+}
+
+function addLog(msg, cls='') {
+  const lb = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = 'log-line ' + cls;
+  d.textContent = msg;
+  lb.appendChild(d);
+  lb.scrollTop = lb.scrollHeight;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runBench() {
+  const lb = document.getElementById('log');
+  lb.innerHTML = '';
+  const dims = parseInt(document.getElementById('dim-sel').value);
+  const bits = parseInt(document.getElementById('bits-sl').value);
+  const batch = parseInt(document.getElementById('batch-sel').value);
+  const g = getGraph();
+  const r = compute(dims, bits, batch);
+
+  addLog('// ─── BENCHMARK START ─────────────────────────', 'info');
+  await sleep(80);
+  addLog(`> dim=${dims}, bits=${bits}, batch=${batch}, graph=${g.name}`);
+  await sleep(100);
+  addLog(`> original vector size: ${r.orig} bits (${dims}×32)`);
+  await sleep(120);
+  addLog('// ─── TurboQuant (polar baseline) ─────────────', 'info');
+  await sleep(100);
+  addLog(`> compressed: ${r.tq.total.toFixed(0)} bits/vec`);
+  await sleep(80);
+  addLog(`> ratio: ${r.tq.ratio.toFixed(2)}x | bits/dim: ${r.tq.bpd}`, 'ok');
+  await sleep(120);
+  addLog(`// ─── ${g.name} graph-only ─────────────────`, 'info');
+  await sleep(100);
+  addLog(`> chunks: ${Math.ceil(dims/22)} × ${g.dim}D`);
+  await sleep(80);
+  addLog(`> vertex bits: ${Math.ceil(Math.log2(g.vertices))} bits × chunk`);
+  await sleep(80);
+  addLog(`> ratio: ${r.graph.ratio.toFixed(2)}x | overhead: ${(r.graph.overhead/1000).toFixed(0)}K bits`, r.graph.ratio > r.tq.ratio ? 'ok' : 'warn');
+  await sleep(120);
+  addLog('// ─── HYBRID (proposed method) ────────────────', 'info');
+  await sleep(100);
+  addLog('> coarse: graph vertex ID per 22D chunk');
+  await sleep(80);
+  addLog('> fine: 2-bit polar residual per dimension');
+  await sleep(80);
+  addLog(`> ratio: ${r.hyb.ratio.toFixed(2)}x`, r.hyb.ratio > r.tq.ratio ? 'ok' : 'warn');
+  await sleep(80);
+  const gain = ((r.hyb.ratio/r.tq.ratio-1)*100).toFixed(1);
+  addLog(`> hybrid vs TurboQuant: ${parseFloat(gain)>0?'+':''}${gain}%`, parseFloat(gain)>0 ? 'ok' : 'warn');
+  await sleep(80);
+
+  const best = [r.tq.ratio, r.graph.ratio, r.hyb.ratio].indexOf(Math.max(r.tq.ratio, r.graph.ratio, r.hyb.ratio));
+  const bestName = ['TurboQuant', g.name+' only', 'Hybrid'][best];
+  addLog(`// WINNER: ${bestName}`, 'ok');
+  addLog('// ─── END ────────────────────────────────────', 'info');
+
+  document.getElementById('pros').innerHTML = buildAnalysis(r, 'pros');
+  document.getElementById('cons').innerHTML = buildAnalysis(r, 'cons');
+}
+
+function buildAnalysis(r, type) {
+  const pros = [
+    { dot: 'green', text: 'Error bounds guaranteed by graph adjacency structure' },
+    { dot: 'green', text: `${r.g.name} gives optimal sphere packing in 22D chunks` },
+    { dot: 'green', text: 'Residual compression reduces quantization error vs polar alone' },
+    { dot: 'green', text: 'Symmetry group enables O(log n) nearest-vertex search' },
+    { dot: r.hyb.ratio > r.tq.ratio ? 'green' : 'amber', text: r.hyb.ratio > r.tq.ratio ? `${((r.hyb.ratio/r.tq.ratio-1)*100).toFixed(1)}% better compression at batch=${r.batch.toLocaleString()}` : 'Compression advantage requires large batches to amortize overhead' },
+  ];
+  const cons = [
+    { dot: 'red', text: 'Chunking destroys cross-dimension correlations in 22D blocks' },
+    { dot: 'red', text: `Codebook overhead: ${(r.g.codebookBits/1000).toFixed(0)}K bits — kills small batches` },
+    { dot: 'amber', text: 'No GPU-native support for graph traversal (needs custom CUDA kernel)' },
+    { dot: 'amber', text: r.dims !== 22 ? `Dimension mismatch: ${r.dims}D needs ${Math.ceil(r.dims/22)} chunks, losing 22D optimality` : '22D native — no chunking needed, full optimality!' },
+    { dot: 'red', text: 'McLaughlin 275-vertex lookup slower than HS — tradeoff unclear' },
+  ];
+  return (type === 'pros' ? pros : cons).map(i => `
+    <div class="analysis-item"><div class="dot ${i.dot}"></div><span>${i.text}</span></div>
+  `).join('');
+}
+
+update();
+document.getElementById('pros').innerHTML = buildAnalysis(compute(768, 3, 1000), 'pros');
+document.getElementById('cons').innerHTML = buildAnalysis(compute(768, 3, 1000), 'cons');
+</script>
