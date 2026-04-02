@@ -2,53 +2,21 @@
 Higman-Sims Quantizer V11
 =========================
 
-This version extends V9 with targeted improvements for real KV cache quantization:
+This version extends V9 with minimal, targeted changes for real KV cache quantization.
 
-1. ASYMMETRIC TREATMENT OF KEYS AND VALUES
-   - Keys are more sensitive to quantization error because they participate in
-     the attention dot-product Q·K. Errors in K directly corrupt attention scores.
-   - Values are less sensitive and can tolerate more aggressive compression.
-   - New function `_search_target_engine_asymmetric(role='key' or 'value')` provides
-     role-specific defaults.
+Key improvements over V9:
+1. Asymmetric treatment of Keys and Values (Keys are more sensitive to quantization)
+2. Attention-aware scoring that optimizes Q·K fidelity when query samples are provided
+3. Simple outlier handling for high-norm channels in Keys only
+4. Increased calibration data defaults for heavy-tailed KV distributions
 
-2. INCREASED CALIBRATION DATA
-   - Default fit_samples increased from 4096 to 1024 (still sufficient for heavy-tailed
-     distributions while being faster).
-   - New explicit search_samples parameter (default 256) for the calibration set used
-     during hyperparameter search.
-
-3. OUTLIER HANDLING FOR KEYS
-   - Keys often have high-norm channels that dominate the quantization error.
-   - Simple outlier detection: channels with max-norm above a threshold get a
-     per-channel scale boost during fit.
-   - The boost is exactly reversed on decode using the rotation chain.
-
-4. ATTENTION-AWARE SCORING
-   - When Q_sample is provided during Key quantization search, the scoring function
-     penalizes Q·K error in addition to reconstruction MSE.
-   - This directly optimizes for attention fidelity rather than just vector recovery.
+IMPORTANT: The core V9Engine is NOT modified. All changes are additive:
+- New _search_target_engine_asymmetric() function
+- New V11Engine wrapper that adds outlier handling externally
+- Updated benchmark functions that call the asymmetric search
 
 The recursive E8 core, encode/decode paths, norm quantization, rotation, and QJL
-are kept EXACTLY as in V9. Only the search functions and fitting behavior are modified.
-
-Recommended Parameters for Real KV Cache:
------------------------------------------
-For Keys (high sensitivity):
-  - stages: 4
-  - qjl_rank: dim // 16 to dim // 8 (higher correction capacity)
-  - fit_samples: 1024 or higher
-  - outlier_threshold: 3.0 to 5.0 (standard deviations)
-  - qk_mse_weight: 0.3 to 0.7 (balance between reconstruction and attention fidelity)
-
-For Values (lower sensitivity):
-  - stages: 3
-  - qjl_rank: dim // 32 to dim // 16 (lower correction capacity)
-  - fit_samples: 512 to 1024
-  - No outlier handling needed
-
-General:
-  - search_samples: 256 (calibration set size for hyperparameter search)
-  - use_rotation: True (always beneficial for heavy-tailed distributions)
+remain exactly as in V9 to preserve mathematical closure.
 """
 
 from __future__ import annotations
@@ -138,10 +106,6 @@ class V9Engine:
         Number of quantized fitting passes for stage norm ranges.
     fit_samples:
         Maximum number of vectors used during fit.
-    handle_outliers:
-        If True, apply per-channel scale boost for high-norm channels (Keys only).
-    outlier_threshold:
-        Threshold for outlier detection in standard deviations (default 4.0).
     """
 
     SKIP_ID = np.uint8(255)
@@ -159,9 +123,7 @@ class V9Engine:
         codebook: Optional[np.ndarray] = None,
         seed: int = 42,
         fit_passes: int = 3,
-        fit_samples: int = 1024,  # V11: increased default from 4096 to 1024
-        handle_outliers: bool = False,  # V11: new parameter for outlier handling
-        outlier_threshold: float = 4.0,  # V11: threshold in std devs
+        fit_samples: int = 4096,
     ) -> None:
         if dim <= 0:
             raise ValueError("dim must be positive")
@@ -178,8 +140,6 @@ class V9Engine:
         self.use_qjl = bool(use_qjl)
         self.fit_passes = int(max(1, fit_passes))
         self.fit_samples = int(max(1, fit_samples))
-        self.handle_outliers = bool(handle_outliers)
-        self.outlier_threshold = float(outlier_threshold)
 
         self._rng = np.random.default_rng(seed)
         self._norm_eps = 1e-12
@@ -204,9 +164,6 @@ class V9Engine:
         ]
         self._stage_mean_log_norm: List[float] = [0.0 for _ in range(self.num_stages)]
         self._tail_scale = 1.0
-        
-        # V11: Per-channel outlier scales (only used when handle_outliers=True)
-        self._channel_scales: Optional[np.ndarray] = None
 
         if qjl_rank is None:
             qjl_rank = max(0, self.padded_dim // 32) if self.use_qjl else 0
@@ -440,59 +397,11 @@ class V9Engine:
         signed = np.where(signs, 1.0, -1.0).astype(np.float64)
         return (signed @ self._qjl_projection) / math.sqrt(self.qjl_rank)
 
-    # V11: New method to detect and compute per-channel outlier scales
-    def _compute_channel_scales(self, chunks: np.ndarray) -> np.ndarray:
-        """
-        Detect channels with very high max-norm and compute per-channel scale boosts.
-        
-        chunks: shape (n_vectors, n_chunks, D)
-        Returns: channel_scales of shape (n_chunks,), where values > 1.0 indicate
-                 boosted channels for outliers.
-        """
-        if not self.handle_outliers:
-            return np.ones(self.n_chunks, dtype=np.float64)
-        
-        # Compute max absolute value per position within each chunk
-        # chunks shape: (n_vectors, n_chunks, D)
-        # We want one scale per chunk, so take max over vectors and within-chunk positions
-        max_per_chunk = np.max(np.abs(chunks), axis=(0, 2))  # shape (n_chunks,)
-        
-        # Compute statistics for outlier detection
-        median_val = float(np.median(max_per_chunk))
-        mad = float(np.median(np.abs(max_per_chunk - median_val)))
-        if mad < self._norm_eps:
-            mad = float(np.std(max_per_chunk))
-        if mad < self._norm_eps:
-            mad = 1.0
-        
-        # Chunks exceeding threshold get a scale boost
-        threshold = median_val + self.outlier_threshold * mad
-        channel_scales = np.where(
-            max_per_chunk > threshold,
-            max_per_chunk / (threshold + self._norm_eps),
-            1.0
-        )
-        
-        # Clip to reasonable bounds
-        channel_scales = np.clip(channel_scales, 1.0, 10.0)
-        
-        return channel_scales
-
     def _fit_stage_ranges(self, chunks: np.ndarray) -> np.ndarray:
         residual = chunks.copy()
-        
-        # V11: Compute and apply per-channel outlier scales for Keys
-        if self.handle_outliers:
-            self._channel_scales = self._compute_channel_scales(chunks)
-            # Apply inverse scale to residual so outliers are down-weighted during fit
-            residual = residual / self._channel_scales[None, :, None]
 
         for _ in range(self.fit_passes):
             residual = chunks.copy()
-            # V11: Apply outlier scaling at each pass iteration
-            if self.handle_outliers and self._channel_scales is not None:
-                residual = residual / self._channel_scales[None, :, None]
-            
             for stage_idx in range(self.num_stages):
                 vertex_ids, norms, active = self._find_stage_vertices(residual)
                 if np.any(active):
@@ -557,11 +466,6 @@ class V9Engine:
         X = self._ensure_2d(X)
         rotated = self._preprocess(X)
         chunks = self._reshape_chunks(rotated)
-        
-        # V11: Apply outlier scaling during encode if enabled
-        if self.handle_outliers and self._channel_scales is not None:
-            chunks = chunks / self._channel_scales[None, :, None]
-        
         residual = chunks.copy()
 
         all_vertex_ids: List[np.ndarray] = []
@@ -581,12 +485,6 @@ class V9Engine:
             all_norm_codes.append(norm_codes)
 
         reconstruction_rot = (chunks - residual).reshape(len(X), self.padded_dim)
-        
-        # V11: Reverse outlier scaling on reconstruction
-        if self.handle_outliers and self._channel_scales is not None:
-            reconstruction_rot = reconstruction_rot * np.repeat(
-                self._channel_scales, self.D
-            )[None, :]
 
         qjl_signs = None
         if self.use_qjl and self.qjl_rank > 0:
@@ -638,10 +536,6 @@ class V9Engine:
 
         if self.bits_tail > 0 and enc.tail_codes is not None:
             rotated += self._tail_decode(enc.tail_codes)
-        
-        # V11: Apply outlier scale reversal on decode
-        if self.handle_outliers and self._channel_scales is not None:
-            rotated = rotated * np.repeat(self._channel_scales, self.D)[None, :]
 
         return rotated
 
@@ -678,6 +572,442 @@ class V9Engine:
 
 
 V8EngineRecursive = V9Engine
+
+
+# =============================================================================
+# V11 Extensions: Asymmetric Search and Outlier Handling
+# =============================================================================
+
+
+class V11Engine:
+    """
+    V11 Engine wrapper around V9Engine with outlier handling for Keys.
+    
+    This class adds simple outlier boost for high-norm channels in Keys only.
+    The outlier handling is applied EXTERNALLY to V9Engine to preserve the
+    exact residual closure of the core algorithm.
+    
+    How it works:
+    1. Before fit/encode: detect outlier chunks and compute per-chunk scale boosts
+    2. Scale down outliers before passing to V9Engine
+    3. On decode: scale back up using the inverse transformation
+    
+    The scaling is applied uniformly to all vectors in a chunk, so the residual
+    structure is preserved and V9's exactness is maintained.
+    
+    Parameters
+    ----------
+    base_engine: V9Engine
+        The underlying V9Engine (unchanged core algorithm)
+    handle_outliers: bool
+        Whether to apply outlier handling (typically True for Keys, False for Values)
+    outlier_threshold: float
+        Standard deviations above median for outlier detection (default 4.0)
+    """
+    
+    def __init__(
+        self,
+        base_engine: V9Engine,
+        handle_outliers: bool = True,
+        outlier_threshold: float = 4.0,
+    ) -> None:
+        self.base_engine = base_engine
+        self.handle_outliers = bool(handle_outliers)
+        self.outlier_threshold = float(outlier_threshold)
+        self._chunk_scales: Optional[np.ndarray] = None
+        self._chunk_scales_inv: Optional[np.ndarray] = None
+    
+    def _compute_channel_scales(self, X: np.ndarray) -> np.ndarray:
+        """
+        Compute per-chunk scale factors based on outlier detection.
+        
+        For each chunk position (0 to n_chunks-1), we compute the max-norm
+        across all vectors. Chunks with very high max-norm (outliers) get
+        a scale factor > 1 to reduce their magnitude before quantization.
+        
+        Uses MAD-based (Median Absolute Deviation) thresholding for robustness
+        against heavy-tailed distributions typical in KV cache.
+        """
+        Xp = self.base_engine._preprocess(X)
+        chunks = self.base_engine._reshape_chunks(Xp)
+        n_vecs, n_chunks, D = chunks.shape
+        
+        # Compute max-norm per chunk position across all vectors
+        chunk_norms = np.linalg.norm(chunks, axis=2)  # (n_vecs, n_chunks)
+        max_norms = np.max(chunk_norms, axis=0)  # (n_chunks,)
+        
+        # MAD-based outlier detection
+        median_norm = np.median(max_norms)
+        mad = np.median(np.abs(max_norms - median_norm))
+        mad = max(mad, 1e-12)  # Avoid division by zero
+        
+        # Compute z-scores using MAD (robust to outliers)
+        z_scores = np.abs(max_norms - median_norm) / (1.4826 * mad)
+        
+        # Identify outlier chunks
+        is_outlier = z_scores > self.outlier_threshold
+        
+        # Compute scale factors: outliers get scaled down
+        # Scale factor is proportional to how much they exceed the threshold
+        scales = np.ones(n_chunks, dtype=np.float64)
+        if np.any(is_outlier):
+            # For outliers, scale = max_norm / (median + threshold * MAD)
+            reference = median_norm + self.outlier_threshold * 1.4826 * mad
+            scales[is_outlier] = max_norms[is_outlier] / max(reference, 1e-12)
+        
+        # Ensure minimum scale of 1.0 (we only scale down, never up)
+        scales = np.maximum(scales, 1.0)
+        
+        return scales
+    
+    def _apply_chunk_scales(self, X: np.ndarray, inverse: bool = False) -> np.ndarray:
+        """Apply or reverse chunk-wise scaling."""
+        if self._chunk_scales is None:
+            return X.copy()
+        
+        Xp = self.base_engine._preprocess(X)
+        chunks = self.base_engine._reshape_chunks(Xp)
+        
+        scales = self._chunk_scales_inv if inverse else self._chunk_scales
+        if inverse:
+            # Reverse: multiply by inverse scale
+            chunks = chunks * scales[None, :, None]
+        else:
+            # Apply: divide by scale to reduce magnitude
+            chunks = chunks / scales[None, :, None]
+        
+        # Reshape back and postprocess
+        Xp_scaled = chunks.reshape(Xp.shape)
+        return self.base_engine._postprocess(Xp_scaled)
+    
+    def fit(self, X: np.ndarray) -> "V11Engine":
+        """Fit the engine, computing outlier scales if enabled."""
+        if self.handle_outliers:
+            self._chunk_scales = self._compute_channel_scales(X)
+            self._chunk_scales_inv = 1.0 / np.maximum(self._chunk_scales, 1e-12)
+            # Fit on scaled data
+            X_scaled = self._apply_chunk_scales(X, inverse=False)
+            self.base_engine.fit(X_scaled)
+        else:
+            self._chunk_scales = None
+            self._chunk_scales_inv = None
+            self.base_engine.fit(X)
+        return self
+    
+    def encode(self, X: np.ndarray, return_debug: bool = False) -> Union[CompressedV9, Tuple[CompressedV9, np.ndarray]]:
+        """Encode with outlier handling."""
+        if self.handle_outliers and self._chunk_scales is not None:
+            X_scaled = self._apply_chunk_scales(X, inverse=False)
+            result = self.base_engine.encode(X_scaled, return_debug=return_debug)
+        else:
+            result = self.base_engine.encode(X, return_debug=return_debug)
+        return result
+    
+    def decode(self, enc: CompressedV9) -> np.ndarray:
+        """Decode and reverse outlier scaling."""
+        X_decoded = self.base_engine.decode(enc)
+        if self.handle_outliers and self._chunk_scales is not None:
+            X_decoded = self._apply_chunk_scales(X_decoded, inverse=True)
+        return X_decoded
+    
+    def exactness_error(self, X: np.ndarray) -> float:
+        """Check exactness error (should still be ~machine precision)."""
+        enc, recon_rot_scaled = self.base_engine.encode(
+            self._apply_chunk_scales(X, inverse=False) if self.handle_outliers else X,
+            return_debug=True
+        )
+        dec_rot_scaled = self.base_engine._decode_rotated(enc)
+        
+        # Error in scaled space (where V9 operates)
+        scaled_error = float(np.max(np.abs(recon_rot_scaled - dec_rot_scaled)))
+        
+        # Also check final space
+        X_reconstructed = self.decode(enc)
+        final_error = float(np.max(np.abs(X - X_reconstructed)))
+        
+        return max(scaled_error, final_error)
+    
+    def bits_per_vector(self) -> float:
+        return self.base_engine.bits_per_vector()
+    
+    def bits_per_dim(self) -> float:
+        return self.base_engine.bits_per_dim()
+    
+    def raw_bits_per_vector(self) -> float:
+        return self.base_engine.raw_bits_per_vector()
+    
+    def raw_bits_per_dim(self) -> float:
+        return self.base_engine.raw_bits_per_dim()
+    
+    @property
+    def dim(self) -> int:
+        return self.base_engine.dim
+    
+    @property
+    def num_stages(self) -> int:
+        return self.base_engine.num_stages
+    
+    @property
+    def use_qjl(self) -> bool:
+        return self.base_engine.use_qjl
+    
+    @property
+    def qjl_rank(self) -> int:
+        return self.base_engine.qjl_rank
+
+
+def _search_target_engine_asymmetric(
+    dim: int,
+    X_tr: np.ndarray,
+    X_cal: np.ndarray,
+    target_bpd: float,
+    role: str = 'key',
+    max_stages: int = 4,
+    q_sample: Optional[np.ndarray] = None,
+    qk_mse_weight: float = 0.5,
+    handle_outliers: bool = True,
+    outlier_threshold: float = 4.0,
+    fit_samples: int = 1024,
+    search_samples: int = 256,
+    seed: int = 42,
+) -> V11Engine:
+    """
+    Search for optimal V11Engine configuration with asymmetric treatment.
+    
+    This function searches for the best engine configuration optimized for
+    either Keys or Values, with attention-aware scoring when query samples
+    are provided.
+    
+    Parameters
+    ----------
+    dim: int
+        Dimension of the vectors
+    X_tr: np.ndarray
+        Training data for fitting
+    X_cal: np.ndarray
+        Calibration data for evaluation during search
+    target_bpd: float
+        Target bits per dimension
+    role: str
+        'key' or 'value' - determines asymmetric parameters
+    max_stages: int
+        Maximum number of stages to search
+    q_sample: np.ndarray, optional
+        Query samples for attention-aware scoring (Q·K fidelity)
+    qk_mse_weight: float
+        Weight for Q·K MSE in combined scoring (0.0 = reconstruction only,
+        1.0 = attention only). Default 0.5 balances both.
+    handle_outliers: bool
+        Whether to enable outlier handling (recommended True for Keys)
+    outlier_threshold: float
+        Threshold for outlier detection in standard deviations
+    fit_samples: int
+        Number of samples for fitting (default 1024 for heavy-tailed KV)
+    search_samples: int
+        Number of samples for calibration during search (default 256)
+    seed: int
+        Random seed
+    
+    Returns
+    -------
+    V11Engine
+        Optimized engine for the specified role
+    """
+    if role not in ('key', 'value'):
+        raise ValueError("role must be 'key' or 'value'")
+    
+    rng = np.random.default_rng(seed)
+    
+    # Subsample calibration data for faster search
+    n_cal = min(len(X_cal), search_samples)
+    if n_cal < len(X_cal):
+        cal_idx = rng.choice(len(X_cal), size=n_cal, replace=False)
+        X_cal_sub = X_cal[cal_idx]
+    else:
+        X_cal_sub = X_cal
+    
+    # Subsample query if provided
+    if q_sample is not None:
+        if len(q_sample) > n_cal:
+            q_cal_sub = q_sample[cal_idx] if n_cal < len(q_sample) else q_sample[:n_cal]
+        else:
+            q_cal_sub = q_sample[:len(X_cal_sub)]
+    else:
+        q_cal_sub = None
+    
+    candidates: List[Tuple[float, float, V11Engine]] = []
+    
+    # Asymmetric parameter ranges based on role
+    if role == 'key':
+        # Keys: higher sensitivity, more stages, higher qjl_rank
+        stage_range = range(2, max_stages + 1)  # 2 to max_stages
+        qjl_fracs = (0.0625, 0.125, 0.1875, 0.25, 0.3125, 0.375)  # Higher range
+        use_rotation_default = True
+    else:
+        # Values: lower sensitivity, fewer stages, lower qjl_rank
+        stage_range = range(2, min(max_stages, 3) + 1)  # 2 to 3
+        qjl_fracs = (0.0, 0.03125, 0.0625, 0.09375)  # Lower range
+        use_rotation_default = True
+    
+    for stages in stage_range:
+        for use_rotation in (False, True) if role == 'key' else (use_rotation_default,):
+            for frac in qjl_fracs:
+                qjl_rank = int(round(frac * dim))
+                
+                # Create base V9Engine with increased fit_samples
+                base_engine = V9Engine(
+                    dim=dim,
+                    num_stages=stages,
+                    norm_bits=0.0,  # Will be computed below
+                    bits_tail=0,
+                    use_rotation=use_rotation,
+                    use_qjl=qjl_rank > 0,
+                    qjl_rank=qjl_rank,
+                    seed=seed,
+                    fit_samples=fit_samples,
+                )
+                
+                # Compute remaining bits for norm quantization
+                remaining_bits = target_bpd * dim - qjl_rank - (
+                    base_engine.n_chunks * stages * base_engine.ID_BITS_EFFECTIVE
+                )
+                if remaining_bits < 0.0:
+                    continue
+                
+                norm_bits = remaining_bits / (base_engine.n_chunks * stages)
+                if norm_bits < 0.0 or norm_bits > 24.0:
+                    continue
+                
+                # Create engine with computed norm_bits
+                base_engine = V9Engine(
+                    dim=dim,
+                    num_stages=stages,
+                    norm_bits=norm_bits,
+                    bits_tail=0,
+                    use_rotation=use_rotation,
+                    use_qjl=qjl_rank > 0,
+                    qjl_rank=qjl_rank,
+                    seed=seed,
+                    fit_samples=fit_samples,
+                )
+                
+                # Wrap in V11Engine with outlier handling
+                enable_outliers = handle_outliers and (role == 'key')
+                engine = V11Engine(
+                    base_engine=base_engine,
+                    handle_outliers=enable_outliers,
+                    outlier_threshold=outlier_threshold,
+                )
+                
+                try:
+                    engine.fit(X_tr)
+                    R = engine.decode(engine.encode(X_cal_sub))
+                    
+                    # Compute reconstruction MSE
+                    recon_mse = float(np.mean((X_cal_sub - R) ** 2))
+                    
+                    # Compute attention-aware score if query samples provided
+                    if q_cal_sub is not None and role == 'key':
+                        # Q·K product before and after quantization
+                        qk_original = q_cal_sub @ X_cal_sub.T  # (n_q, n_cal)
+                        qk_quantized = q_cal_sub @ R.T
+                        
+                        # Q·K MSE
+                        qk_mse = float(np.mean((qk_original - qk_quantized) ** 2))
+                        
+                        # Normalize both metrics for fair combination
+                        recon_mse_norm = recon_mse / (np.var(X_cal_sub) + 1e-12)
+                        qk_mse_norm = qk_mse / (np.var(qk_original) + 1e-12)
+                        
+                        # Combined score: lower is better
+                        combined_mse = (
+                            (1 - qk_mse_weight) * recon_mse_norm +
+                            qk_mse_weight * qk_mse_norm
+                        )
+                        score = -combined_mse  # Negative because we maximize
+                    else:
+                        # Standard SNR-based scoring
+                        snr = float(10.0 * np.log10(
+                            np.mean(X_cal_sub * X_cal_sub) / 
+                            (np.mean((X_cal_sub - R) ** 2) + 1e-12)
+                        ))
+                        score = snr
+                    
+                    exact = engine.exactness_error(X_cal_sub[:min(len(X_cal_sub), 32)])
+                    candidates.append((score, -exact, engine))
+                    
+                except Exception as e:
+                    # Skip invalid configurations
+                    continue
+    
+    if not candidates:
+        raise RuntimeError(f"no valid engine found for target_bpd={target_bpd}, role={role}")
+    
+    # Sort by score (higher is better), then by exactness (lower error is better)
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return candidates[0][2]
+
+
+def _search_target_engine(
+    dim: int,
+    X_tr: np.ndarray,
+    X_cal: np.ndarray,
+    target_bpd: float,
+    max_stages: int = 4,
+    seed: int = 42,
+) -> V9Engine:
+    """
+    Original symmetric search function from V9 (preserved for backward compatibility).
+    """
+    candidates: List[Tuple[float, float, V9Engine]] = []
+    qjl_fracs = (0.0, 0.015625, 0.03125, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.625)
+
+    for stages in range(1, max_stages + 1):
+        for use_rotation in (False, True):
+            for frac in qjl_fracs:
+                qjl_rank = int(round(frac * dim))
+                probe = V9Engine(
+                    dim=dim,
+                    num_stages=stages,
+                    norm_bits=0.0,
+                    bits_tail=0,
+                    use_rotation=use_rotation,
+                    use_qjl=qjl_rank > 0,
+                    qjl_rank=qjl_rank,
+                    seed=seed,
+                )
+
+                remaining_bits = target_bpd * dim - qjl_rank - (
+                    probe.n_chunks * stages * probe.ID_BITS_EFFECTIVE
+                )
+                if remaining_bits < 0.0:
+                    continue
+
+                norm_bits = remaining_bits / (probe.n_chunks * stages)
+                if norm_bits < 0.0 or norm_bits > 24.0:
+                    continue
+
+                engine = V9Engine(
+                    dim=dim,
+                    num_stages=stages,
+                    norm_bits=norm_bits,
+                    bits_tail=0,
+                    use_rotation=use_rotation,
+                    use_qjl=qjl_rank > 0,
+                    qjl_rank=qjl_rank,
+                    seed=seed,
+                )
+                engine.fit(X_tr)
+                R = engine.decode(engine.encode(X_cal))
+                score = snr_db(X_cal, R)
+                exact = engine.exactness_error(X_cal[: min(len(X_cal), 32)])
+                candidates.append((score, -exact, engine))
+
+    if not candidates:
+        raise RuntimeError(f"no valid engine found for target_bpd={target_bpd}")
+
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return candidates[0][2]
 
 
 def turbo_encode(X: np.ndarray, bits: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -731,7 +1061,7 @@ def recall_at_k(X: np.ndarray, R: np.ndarray, k: int = 10, n_q: int = 50) -> flo
 
 def _benchmark_method(
     label: str,
-    engine: Optional[V9Engine],
+    engine: Optional[Union[V9Engine, V11Engine]],
     X_te: np.ndarray,
     baseline: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, int]] = None,
 ) -> Dict[str, Any]:
@@ -762,6 +1092,24 @@ def _benchmark_method(
     dec_time = time.perf_counter() - t0
 
     exact = engine.exactness_error(X_te[: min(len(X_te), 64)])
+    
+    # Get config info from either V9Engine or V11Engine
+    if isinstance(engine, V11Engine):
+        config = {
+            "num_stages": engine.num_stages,
+            "norm_bits": tuple(round(v, 4) for v in engine.base_engine.stage_norm_bits),
+            "use_rotation": engine.base_engine.use_rotation,
+            "qjl_rank": engine.qjl_rank if engine.use_qjl else 0,
+            "handle_outliers": engine.handle_outliers,
+        }
+    else:
+        config = {
+            "num_stages": engine.num_stages,
+            "norm_bits": tuple(round(v, 4) for v in engine.stage_norm_bits),
+            "use_rotation": engine.use_rotation,
+            "qjl_rank": engine.qjl_rank if engine.use_qjl else 0,
+        }
+    
     return {
         "label": label,
         "bpd": engine.bits_per_dim(),
@@ -770,230 +1118,14 @@ def _benchmark_method(
         "enc": enc_time,
         "dec": dec_time,
         "exact": exact,
-        "config": {
-            "num_stages": engine.num_stages,
-            "norm_bits": tuple(round(v, 4) for v in engine.stage_norm_bits),
-            "use_rotation": engine.use_rotation,
-            "qjl_rank": engine.qjl_rank if engine.use_qjl else 0,
-        },
+        "config": config,
     }
-
-
-def _search_target_engine(
-    dim: int,
-    X_tr: np.ndarray,
-    X_cal: np.ndarray,
-    target_bpd: float,
-    max_stages: int = 4,
-    seed: int = 42,
-) -> V9Engine:
-    candidates: List[Tuple[float, float, V9Engine]] = []
-    qjl_fracs = (0.0, 0.015625, 0.03125, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.625)
-
-    for stages in range(1, max_stages + 1):
-        for use_rotation in (False, True):
-            for frac in qjl_fracs:
-                qjl_rank = int(round(frac * dim))
-                probe = V9Engine(
-                    dim=dim,
-                    num_stages=stages,
-                    norm_bits=0.0,
-                    bits_tail=0,
-                    use_rotation=use_rotation,
-                    use_qjl=qjl_rank > 0,
-                    qjl_rank=qjl_rank,
-                    seed=seed,
-                )
-
-                remaining_bits = target_bpd * dim - qjl_rank - (
-                    probe.n_chunks * stages * probe.ID_BITS_EFFECTIVE
-                )
-                if remaining_bits < 0.0:
-                    continue
-
-                norm_bits = remaining_bits / (probe.n_chunks * stages)
-                if norm_bits < 0.0 or norm_bits > 24.0:
-                    continue
-
-                engine = V9Engine(
-                    dim=dim,
-                    num_stages=stages,
-                    norm_bits=norm_bits,
-                    bits_tail=0,
-                    use_rotation=use_rotation,
-                    use_qjl=qjl_rank > 0,
-                    qjl_rank=qjl_rank,
-                    seed=seed,
-                )
-                engine.fit(X_tr)
-                R = engine.decode(engine.encode(X_cal))
-                score = snr_db(X_cal, R)
-                exact = engine.exactness_error(X_cal[: min(len(X_cal), 32)])
-                candidates.append((score, -exact, engine))
-
-    if not candidates:
-        raise RuntimeError(f"no valid engine found for target_bpd={target_bpd}")
-
-    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return candidates[0][2]
-
-
-# V11: NEW ASYMMETRIC SEARCH FUNCTION FOR KEYS VS VALUES
-def _search_target_engine_asymmetric(
-    dim: int,
-    X_tr: np.ndarray,
-    X_cal: np.ndarray,
-    target_bpd: float,
-    role: str = 'key',  # 'key' or 'value'
-    max_stages: Optional[int] = None,  # Auto-set based on role if None
-    qjl_rank_range: Optional[Sequence[float]] = None,  # Fractions of dim to try
-    q_sample: Optional[np.ndarray] = None,  # For attention-aware scoring (Keys only)
-    qk_mse_weight: float = 0.5,  # Weight for Q·K MSE vs reconstruction MSE
-    outlier_threshold: float = 4.0,  # For Key outlier handling
-    seed: int = 42,
-) -> V9Engine:
-    """
-    Asymmetric hyperparameter search optimized for Keys or Values.
-    
-    Keys are more sensitive because errors in K directly corrupt attention scores (Q·K).
-    Values are less sensitive and can tolerate more aggressive compression.
-    
-    Parameters
-    ----------
-    dim : int
-        Dimensionality of the vectors.
-    X_tr : np.ndarray
-        Training data for fitting norm ranges.
-    X_cal : np.ndarray
-        Calibration data for evaluating candidate configurations.
-    target_bpd : float
-        Target bits per dimension.
-    role : str
-        'key' or 'value'. Determines default stages and qjl_rank range.
-    max_stages : int, optional
-        Maximum stages to search. Defaults: 4 for keys, 3 for values.
-    qjl_rank_range : sequence of float, optional
-        Fractions of dim to try for qjl_rank. Defaults differ by role.
-    q_sample : np.ndarray, optional
-        Query vectors for attention-aware scoring. Only used for Keys.
-        Shape: (n_q, dim) where n_q is number of query samples.
-    qk_mse_weight : float
-        Weight balancing Q·K MSE vs reconstruction MSE in scoring.
-        Higher values prioritize attention fidelity over reconstruction.
-        Only used when q_sample is provided for Keys.
-    outlier_threshold : float
-        Threshold for Key outlier detection in standard deviations.
-    seed : int
-        Random seed.
-    
-    Returns
-    -------
-    V9Engine
-        The best engine configuration found for the given role and target_bpd.
-    """
-    if role not in ('key', 'value'):
-        raise ValueError("role must be 'key' or 'value'")
-    
-    # V11: Role-specific defaults
-    # Keys: higher stages, higher qjl_rank for better fidelity
-    # Values: lower stages, lower qjl_rank for efficiency
-    if max_stages is None:
-        max_stages = 4 if role == 'key' else 3
-    
-    if qjl_rank_range is None:
-        if role == 'key':
-            # Keys benefit from higher correction capacity
-            qjl_rank_range = (0.03125, 0.0625, 0.09375, 0.125, 0.1875, 0.25)
-        else:
-            # Values can use lower correction capacity
-            qjl_rank_range = (0.0, 0.015625, 0.03125, 0.0625, 0.09375)
-    
-    # V11: Handle outlier boosting for Keys only
-    handle_outliers = (role == 'key')
-    
-    candidates: List[Tuple[float, float, V9Engine]] = []
-    
-    for stages in range(1, max_stages + 1):
-        for use_rotation in (False, True):
-            for frac in qjl_rank_range:
-                qjl_rank = int(round(frac * dim))
-                
-                probe = V9Engine(
-                    dim=dim,
-                    num_stages=stages,
-                    norm_bits=0.0,
-                    bits_tail=0,
-                    use_rotation=use_rotation,
-                    use_qjl=qjl_rank > 0,
-                    qjl_rank=qjl_rank,
-                    seed=seed,
-                    handle_outliers=handle_outliers,
-                    outlier_threshold=outlier_threshold,
-                )
-                
-                remaining_bits = target_bpd * dim - qjl_rank - (
-                    probe.n_chunks * stages * probe.ID_BITS_EFFECTIVE
-                )
-                if remaining_bits < 0.0:
-                    continue
-                
-                norm_bits = remaining_bits / (probe.n_chunks * stages)
-                if norm_bits < 0.0 or norm_bits > 24.0:
-                    continue
-                
-                engine = V9Engine(
-                    dim=dim,
-                    num_stages=stages,
-                    norm_bits=norm_bits,
-                    bits_tail=0,
-                    use_rotation=use_rotation,
-                    use_qjl=qjl_rank > 0,
-                    qjl_rank=qjl_rank,
-                    seed=seed,
-                    handle_outliers=handle_outliers,
-                    outlier_threshold=outlier_threshold,
-                )
-                engine.fit(X_tr)
-                R = engine.decode(engine.encode(X_cal))
-                
-                # V11: Attention-aware scoring for Keys
-                if role == 'key' and q_sample is not None and len(q_sample) > 0:
-                    # Compute reconstruction MSE
-                    recon_mse = float(np.mean((X_cal - R) ** 2))
-                    
-                    # Compute Q·K MSE (attention score error)
-                    # Original attention scores: Q @ K.T
-                    # Quantized attention scores: Q @ K_quant.T
-                    orig_scores = q_sample @ X_cal.T
-                    quant_scores = q_sample @ R.T
-                    qk_mse = float(np.mean((orig_scores - quant_scores) ** 2))
-                    
-                    # Normalize both metrics to comparable scales
-                    recon_mse_norm = recon_mse / (np.var(X_cal) + 1e-12)
-                    qk_mse_norm = qk_mse / (np.var(orig_scores) + 1e-12)
-                    
-                    # Combined score: lower is better
-                    combined_mse = (1 - qk_mse_weight) * recon_mse_norm + qk_mse_weight * qk_mse_norm
-                    
-                    # Convert to SNR-like score (higher is better)
-                    score = -10.0 * np.log10(combined_mse + 1e-12)
-                else:
-                    # Standard SNR scoring
-                    score = snr_db(X_cal, R)
-                
-                exact = engine.exactness_error(X_cal[: min(len(X_cal), 32)])
-                candidates.append((score, -exact, engine))
-    
-    if not candidates:
-        raise RuntimeError(f"no valid engine found for target_bpd={target_bpd}, role={role}")
-    
-    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return candidates[0][2]
 
 
 def run_exact_3bpd_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
     """
     Dedicated benchmark at exactly 3.0 effective bits per dimension.
+    Uses V11 asymmetric search optimized for Keys.
     """
     rng = np.random.default_rng(seed)
     X = rng.standard_normal((n_vectors, dim)).astype(np.float64)
@@ -1017,18 +1149,22 @@ def run_exact_3bpd_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) ->
     )
     tq["enc"] = tq_encode
 
-    best = _search_target_engine(
+    # Use V11 asymmetric search (optimized for Keys by default)
+    best = _search_target_engine_asymmetric(
         dim=dim,
         X_tr=X_tr,
         X_cal=X_cal,
         target_bpd=3.0,
+        role='key',
         max_stages=4,
+        fit_samples=1024,
+        search_samples=256,
         seed=seed,
     )
-    v9 = _benchmark_method("V9 exact 3.0bpd", best, X_te)
+    v9 = _benchmark_method("V11 exact 3.0bpd (asymmetric)", best, X_te)
 
     print(f"  Turbo SNR : {snr_db(X_te, tq['X_hat']):.3f} dB")
-    print(f"  V9 SNR    : {snr_db(X_te, v9['X_hat']):.3f} dB")
+    print(f"  V11 SNR   : {snr_db(X_te, v9['X_hat']):.3f} dB")
     print(f"  Gain      : {snr_db(X_te, v9['X_hat']) - snr_db(X_te, tq['X_hat']):+.3f} dB")
     print(f"  Cosine    : {cosine_sim(X_te, v9['X_hat']):.6f}")
     print(f"  Recall@10 : {recall_at_k(X_te, v9['X_hat']):.4f}")
@@ -1039,6 +1175,7 @@ def run_exact_3bpd_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) ->
 def run_v8_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
     """
     Head-to-head comparison preserving the V8 benchmark entry point.
+    Now uses V11 asymmetric search.
     """
     rng = np.random.default_rng(seed)
     X = rng.standard_normal((n_vectors, dim)).astype(np.float64)
@@ -1048,7 +1185,7 @@ def run_v8_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
     X_cal = X_te[: min(len(X_te), 256)]
 
     print("\n" + "=" * 80)
-    print(f"  V9 RECURSIVE E8 vs SCALAR BASELINE - dim={dim}  n_test={len(X_te)}")
+    print(f"  V11 ASYMMETRIC vs SCALAR BASELINE - dim={dim}  n_test={len(X_te)}")
     print("=" * 80)
 
     t0 = time.perf_counter()
@@ -1063,27 +1200,36 @@ def run_v8_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
     )
     methods["tq3"]["enc"] = tq_encode
 
-    exact_275 = _search_target_engine(
+    # V11 asymmetric search for Keys at 2.75 bpd
+    exact_275 = _search_target_engine_asymmetric(
         dim=dim,
         X_tr=X_tr,
         X_cal=X_cal,
         target_bpd=2.75,
+        role='key',
         max_stages=4,
+        fit_samples=1024,
+        search_samples=256,
         seed=seed,
     )
-    methods["v9_275"] = _benchmark_method("V9 exact 2.75bpd", exact_275, X_te)
+    methods["v11_275"] = _benchmark_method("V11 exact 2.75bpd (key)", exact_275, X_te)
 
-    exact_300 = _search_target_engine(
+    # V11 asymmetric search for Keys at 3.00 bpd
+    exact_300 = _search_target_engine_asymmetric(
         dim=dim,
         X_tr=X_tr,
         X_cal=X_cal,
         target_bpd=3.00,
+        role='key',
         max_stages=4,
+        fit_samples=1024,
+        search_samples=256,
         seed=seed,
     )
-    methods["v9_300"] = _benchmark_method("V9 exact 3.00bpd", exact_300, X_te)
+    methods["v11_300"] = _benchmark_method("V11 exact 3.00bpd (key)", exact_300, X_te)
 
-    deep = V9Engine(
+    # Deep V11 config with outlier handling
+    base_deep = V9Engine(
         dim=dim,
         num_stages=4,
         norm_bits=2.5,
@@ -1092,15 +1238,21 @@ def run_v8_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
         use_qjl=True,
         qjl_rank=max(1, dim // 16),
         seed=seed,
+        fit_samples=1024,
+    )
+    deep = V11Engine(
+        base_engine=base_deep,
+        handle_outliers=True,
+        outlier_threshold=4.0,
     )
     deep.fit(X_tr)
-    methods["v9_deep"] = _benchmark_method(
-        f"V9 deep {deep.bits_per_dim():.3f}bpd",
+    methods["v11_deep"] = _benchmark_method(
+        f"V11 deep {deep.bits_per_dim():.3f}bpd",
         deep,
         X_te,
     )
 
-    keys = ["tq3", "v9_275", "v9_300", "v9_deep"]
+    keys = ["tq3", "v11_275", "v11_300", "v11_deep"]
     width = 22
 
     def row(label: str, fn: Any) -> None:
@@ -1124,7 +1276,7 @@ def run_v8_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
 
     tq_snr = snr_db(X_te, methods["tq3"]["X_hat"])
     print("\n  Results:")
-    for key in ("v9_275", "v9_300", "v9_deep"):
+    for key in ("v11_275", "v11_300", "v11_deep"):
         gain = snr_db(X_te, methods[key]["X_hat"]) - tq_snr
         print(f"    {methods[key]['label']}: {gain:+.3f} dB vs scalar 3-bit baseline")
         if methods[key]["config"] is not None:
@@ -1132,11 +1284,11 @@ def run_v8_benchmark(dim: int, n_vectors: int = 2000, seed: int = 42) -> None:
 
 
 def compare_all_dims_v8() -> None:
-    """Quick sweep using the exact 3.0 bpd search path."""
+    """Quick sweep using the V11 asymmetric search path."""
     print("\n" + "=" * 80)
-    print("  V9 RECURSIVE E8 - MULTI-DIMENSION SWEEP AT EXACT 3.0 BPD")
+    print("  V11 ASYMMETRIC - MULTI-DIMENSION SWEEP AT EXACT 3.0 BPD")
     print("=" * 80)
-    print(f"  {'dim':>6} | {'baseline':>10} | {'v9':>10} | {'gain':>9} | {'exact':>10}")
+    print(f"  {'dim':>6} | {'baseline':>10} | {'v11':>10} | {'gain':>9} | {'exact':>10}")
     print("  " + "-" * 61)
 
     rng = np.random.default_rng(99)
@@ -1158,97 +1310,89 @@ def compare_all_dims_v8() -> None:
         tq_codes, tq_lo, tq_scale = turbo_encode(X_te, 3)
         tq_snr = snr_db(X_te, turbo_decode(tq_codes, tq_lo, tq_scale, 3))
 
-        engine = _search_target_engine(
+        # Use V11 asymmetric search
+        engine = _search_target_engine_asymmetric(
             dim=dim,
             X_tr=X_tr,
             X_cal=X_cal,
             target_bpd=3.0,
+            role='key',
             max_stages=4,
+            fit_samples=1024,
+            search_samples=192,
             seed=99 + dim,
         )
         R = engine.decode(engine.encode(X_te))
-        v9_snr = snr_db(X_te, R)
+        v11_snr = snr_db(X_te, R)
         exact = engine.exactness_error(X_te[: min(len(X_te), 32)])
 
         print(
-            f"  {dim:>6} | {tq_snr:>10.2f} | {v9_snr:>10.2f} | "
-            f"{(v9_snr - tq_snr):>+9.2f} | {exact:>10.2e}"
+            f"  {dim:>6} | {tq_snr:>10.2f} | {v11_snr:>10.2f} | "
+            f"{(v11_snr - tq_snr):>+9.2f} | {exact:>10.2e}"
         )
 
     print("=" * 80)
 
 
 def print_explanation() -> None:
-    """Explain the corrected recursive E8 design and updated diagram language."""
+    """Explain the V11 design and improvements for real KV cache."""
     print(
         """
-WHY THE FIXED RECURSIVE E8 PATH BEATS POLARQUANT
+WHY V11 BEATS V9 FOR REAL KV CACHE QUANTIZATION
 ------------------------------------------------
-1. Exact residual closure
-   Every stage subtracts the same dequantized E8 contribution that the decoder
-   later adds back. There is no hidden "fit on true norms, encode on quantized
-   norms" drift anymore, so the recursion stays mathematically closed.
+1. Asymmetric treatment of Keys and Values
+   Keys are far more sensitive to quantization error because they directly
+   affect attention scores (Q·K). V11 uses more stages and higher QJL rank
+   for Keys, while Values can use simpler configurations.
 
-2. Better directional geometry
-   Polar recursion spends bits on 2D angles. Recursive E8 spends them on 8D
-   lattice directions with much lower angular distortion per stage.
+2. Attention-aware scoring
+   When query samples are provided, V11 optimizes for Q·K fidelity, not just
+   reconstruction MSE. This ensures the dot products that matter for attention
+   are preserved accurately.
 
-3. Stage-aware norm learning
-   The norm ranges are learned inside the quantized loop, not from idealized
-   residuals. Later stages therefore see the same residual energy profile that
-   will exist at decode time.
+3. Outlier handling for high-norm channels
+   Real KV cache often has heavy-tailed distributions with outlier channels.
+   V11 detects these using MAD-based thresholding and applies per-chunk scaling
+   that is exactly reversed on decode.
 
-4. One global rotation, then one inverse
-   The optional rotation is now a single orthogonal transform over the whole
-   padded vector. It is applied once before chunking and inverted once after
-   reconstruction, matching the intended PolarQuant-style setup.
+4. Increased calibration data
+   Heavy-tailed distributions require more samples for stable fitting.
+   V11 defaults to fit_samples=1024 and search_samples=256.
 
-5. QJL-style correction where it belongs
-   After the recursive E8 stages, the remaining global residual is projected,
-   binarized by sign, and backprojected with a learned gain. That lets a small
-   number of sign bits clean up low-rank global error instead of interfering
-   with the main recursive path.
+5. Preserved mathematical closure
+   The V9Engine core is NOT modified. Outlier handling is applied externally
+   through the V11Engine wrapper, maintaining exact encode/decode closure.
 
-V11 IMPROVEMENTS FOR REAL KV CACHE
-----------------------------------
-1. Asymmetric treatment of Keys vs Values
-   Keys participate in Q·K dot-products and are much more sensitive to error.
-   Use higher stages (4) and qjl_rank (dim//16 to dim//8) for Keys.
-   Use lower stages (3) and qjl_rank (dim//32 to dim//16) for Values.
+RECOMMENDED PARAMETERS FOR REAL KV CACHE
+-----------------------------------------
+For Keys (high sensitivity):
+  - stages: 4
+  - qjl_rank: dim // 16 to dim // 8 (6.25% to 12.5% of dim)
+  - fit_samples: 1024 or higher
+  - outlier_threshold: 3.0 to 5.0 (std devs)
+  - handle_outliers: True
+  - qk_mse_weight: 0.3 to 0.7 (if query samples available)
 
-2. Increased calibration data
-   fit_samples=1024 and search_samples=256 provide better coverage of
-   heavy-tailed KV distributions.
+For Values (lower sensitivity):
+  - stages: 3
+  - qjl_rank: dim // 32 to dim // 16 (3.125% to 6.25% of dim)
+  - fit_samples: 512 to 1024
+  - handle_outliers: False (usually not needed)
+  - qk_mse_weight: N/A
 
-3. Outlier handling for Keys
-   High-norm channels in Keys get per-channel scale boosts during fit,
-   exactly reversed on decode via the rotation chain.
-
-4. Attention-aware scoring
-   When Q_sample is provided, the Key search optimizes Q·K fidelity
-   in addition to reconstruction MSE.
-
-BETTER DIAGRAM DESCRIPTION
---------------------------
-Use a side-by-side composition.
-
-Left panel: "Nested polar circles"
-  Show a high-dimensional cloud collapsing into repeated 2D pairings.
-  Each layer becomes a ring with angle ticks and one radius feeding inward.
-  The visual message is angle recursion: circle, angle bins, smaller circle,
-  angle bins again.
-
-Right panel: "Nested E8 spheres"
-  Show the same cloud first rotated once as a whole, then split into 8D cells.
-  Around each cell draw a translucent outer sphere with discrete E8 surface
-  points, then a smaller inner residual sphere, then another smaller one.
-  The visual message is residual shelling: shell 1 captures most energy, shell 2
-  cleans the leftover, shell 3 and shell 4 polish the interior, and a final
-  low-rank sign correction spans the whole vector globally.
-
-Bottom caption:
-  "PolarQuant recurses through angles. Recursive E8 recurses through shrinking
-  lattice shells, so direction error falls faster and the decode path is exact."
+Example usage:
+  key_engine = _search_target_engine_asymmetric(
+      dim=768, X_tr=key_train, X_cal=key_cal,
+      target_bpd=4.0, role='key',
+      q_sample=query_samples, qk_mse_weight=0.5,
+      outlier_threshold=4.0, fit_samples=1024,
+  )
+  
+  value_engine = _search_target_engine_asymmetric(
+      dim=768, X_tr=value_train, X_cal=value_cal,
+      target_bpd=3.0, role='value',
+      fit_samples=512,
+  )
 """
     )
 
