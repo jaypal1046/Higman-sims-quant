@@ -1,6 +1,1 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-docs/*
+Nothing should be ignored in this case, as only Python source files (.py) were added without any build artifacts, dependencies, or temporary files.
