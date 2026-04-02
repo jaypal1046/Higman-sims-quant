@@ -8,44 +8,34 @@ __pycache__/
 # Compiled and build artifacts
 *.o
 *.obj
+*.out
 *.so
-*.a
 *.dll
 *.exe
-*.out
 
 # Dependencies
 .venv/
 venv/
-node_modules/
-.mypy_cache/
-.pytest_cache/
-dist/
-build/
-target/
-.gradle/
+.env
+.env.local
+.env.*
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-*.swo
-
-# Environment
-.env
-.env.local
-*.env.*
 
 # Editors
 .vscode/
 .idea/
 
-# System
-.DS_Store
-Thumbs.db
-
 # Coverage
+.coverage
 coverage/
 htmlcov/
-.coverage
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
 ```
