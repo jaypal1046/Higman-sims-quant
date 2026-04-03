@@ -1,39 +1,59 @@
-# Python
-__pycache__/
+```gitignore
+# Compiled Python files
 *.pyc
-*.pyo
-*.pyd
+__pycache__/
 
-# Compiled and build artifacts
-*.o
-*.obj
+# LaTeX build artifacts
+*.aux
+*.log
+*.toc
+*.lof
+*.lot
 *.out
-*.so
-*.dll
-*.exe
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.pdf
 
 # Dependencies
 .venv/
 venv/
-.env
-.env.local
-.env.*
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
+env/
+node_modules/
 
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Coverage
-.coverage
+# Logs and temporary files
+*.log
+*.tmp
+
+# Environment variables
+.env
+.env.local
+*.env.*
+
+# Coverage reports
 coverage/
 htmlcov/
+.coverage
 
-# Distribution / packaging
+# Distribution files
 dist/
 build/
-*.egg-info/
+target/
+
+# MyPy cache
+.mypy_cache/
+# Pytest cache
+.pytest_cache/
+
+# OS specific
+.DS_Store
+Thumbs.db
+```
