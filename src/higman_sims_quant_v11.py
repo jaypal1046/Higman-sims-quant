@@ -806,10 +806,10 @@ def _search_target_engine_asymmetric(
     fit_samples: int = 1024,
     search_samples: int = 256,
     seed: int = 42,
+    qjl_rank_override: int | None = None,   # ← NEW: allows us to force high QJL rank for Keys
 ) -> V11Engine:
     """
     Search for optimal V11Engine configuration with asymmetric treatment.
-    
     This function searches for the best engine configuration optimized for
     either Keys or Values, with attention-aware scoring when query samples
     are provided.
@@ -843,7 +843,8 @@ def _search_target_engine_asymmetric(
         Number of samples for calibration during search (default 256)
     seed: int
         Random seed
-    
+     qjl_rank_override: int
+           qjl_rank_override lets us force a higher QJL rank (e.g. 192) for Keys
     Returns
     -------
     V11Engine
@@ -851,9 +852,9 @@ def _search_target_engine_asymmetric(
     """
     if role not in ('key', 'value'):
         raise ValueError("role must be 'key' or 'value'")
-    
+
     rng = np.random.default_rng(seed)
-    
+
     # Subsample calibration data for faster search
     n_cal = min(len(X_cal), search_samples)
     if n_cal < len(X_cal):
@@ -861,60 +862,41 @@ def _search_target_engine_asymmetric(
         X_cal_sub = X_cal[cal_idx]
     else:
         X_cal_sub = X_cal
-    
+
     # Subsample query if provided
     if q_sample is not None:
-        if len(q_sample) > n_cal:
-            q_cal_sub = q_sample[cal_idx] if n_cal < len(q_sample) else q_sample[:n_cal]
-        else:
-            q_cal_sub = q_sample[:len(X_cal_sub)]
+        q_cal_sub = q_sample[cal_idx] if n_cal < len(q_sample) else q_sample[:n_cal]
     else:
         q_cal_sub = None
-    
+
     candidates: List[Tuple[float, float, V11Engine]] = []
-    
-    # Asymmetric parameter ranges based on role
+
+    # Asymmetric parameter ranges
     if role == 'key':
-        # Keys: higher sensitivity, more stages, higher qjl_rank
-        stage_range = range(2, max_stages + 1)  # 2 to max_stages
-        qjl_fracs = (0.0625, 0.125, 0.1875, 0.25, 0.3125, 0.375)  # Higher range
+        stage_range = range(2, max_stages + 1)
+        qjl_fracs = (0.0625, 0.125, 0.1875, 0.25, 0.3125, 0.375)
         use_rotation_default = True
     else:
-        # Values: lower sensitivity, fewer stages, lower qjl_rank
-        stage_range = range(2, min(max_stages, 3) + 1)  # 2 to 3
-        qjl_fracs = (0.0, 0.03125, 0.0625, 0.09375)  # Lower range
+        stage_range = range(2, min(max_stages, 3) + 1)
+        qjl_fracs = (0.0, 0.03125, 0.0625, 0.09375)
         use_rotation_default = True
-    
+
     for stages in stage_range:
         for use_rotation in (False, True) if role == 'key' else (use_rotation_default,):
             for frac in qjl_fracs:
-                qjl_rank = int(round(frac * dim))
-                
-                # Create base V9Engine with increased fit_samples
-                base_engine = V9Engine(
-                    dim=dim,
-                    num_stages=stages,
-                    norm_bits=0.0,  # Will be computed below
-                    bits_tail=0,
-                    use_rotation=use_rotation,
-                    use_qjl=qjl_rank > 0,
-                    qjl_rank=qjl_rank,
-                    seed=seed,
-                    fit_samples=fit_samples,
-                )
-                
-                # Compute remaining bits for norm quantization
+                # Use override if provided, otherwise calculate from fraction
+                qjl_rank = qjl_rank_override if qjl_rank_override is not None else int(round(frac * dim))
+
                 remaining_bits = target_bpd * dim - qjl_rank - (
-                    base_engine.n_chunks * stages * base_engine.ID_BITS_EFFECTIVE
+                    (dim // 8) * stages * (math.log2(240))   # approximate ID bits
                 )
                 if remaining_bits < 0.0:
                     continue
-                
-                norm_bits = remaining_bits / (base_engine.n_chunks * stages)
+
+                norm_bits = remaining_bits / ((dim // 8) * stages)
                 if norm_bits < 0.0 or norm_bits > 24.0:
                     continue
-                
-                # Create engine with computed norm_bits
+
                 base_engine = V9Engine(
                     dim=dim,
                     num_stages=stages,
@@ -926,63 +908,43 @@ def _search_target_engine_asymmetric(
                     seed=seed,
                     fit_samples=fit_samples,
                 )
-                
-                # Wrap in V11Engine with outlier handling
+
                 enable_outliers = handle_outliers and (role == 'key')
                 engine = V11Engine(
                     base_engine=base_engine,
                     handle_outliers=enable_outliers,
                     outlier_threshold=outlier_threshold,
                 )
-                
+
                 try:
                     engine.fit(X_tr)
                     R = engine.decode(engine.encode(X_cal_sub))
-                    
-                    # Compute reconstruction MSE
+
                     recon_mse = float(np.mean((X_cal_sub - R) ** 2))
-                    
-                    # Compute attention-aware score if query samples provided
+
                     if q_cal_sub is not None and role == 'key':
-                        # Q·K product before and after quantization
-                        qk_original = q_cal_sub @ X_cal_sub.T  # (n_q, n_cal)
+                        qk_original = q_cal_sub @ X_cal_sub.T
                         qk_quantized = q_cal_sub @ R.T
-                        
-                        # Q·K MSE
                         qk_mse = float(np.mean((qk_original - qk_quantized) ** 2))
-                        
-                        # Normalize both metrics for fair combination
                         recon_mse_norm = recon_mse / (np.var(X_cal_sub) + 1e-12)
                         qk_mse_norm = qk_mse / (np.var(qk_original) + 1e-12)
-                        
-                        # Combined score: lower is better
-                        combined_mse = (
-                            (1 - qk_mse_weight) * recon_mse_norm +
-                            qk_mse_weight * qk_mse_norm
-                        )
-                        score = -combined_mse  # Negative because we maximize
+                        combined_mse = (1 - qk_mse_weight) * recon_mse_norm + qk_mse_weight * qk_mse_norm
+                        score = -combined_mse
                     else:
-                        # Standard SNR-based scoring
-                        snr = float(10.0 * np.log10(
-                            np.mean(X_cal_sub * X_cal_sub) / 
-                            (np.mean((X_cal_sub - R) ** 2) + 1e-12)
-                        ))
+                        snr = float(10.0 * np.log10(np.mean(X_cal_sub * X_cal_sub) / (np.mean((X_cal_sub - R) ** 2) + 1e-12)))
                         score = snr
-                    
+
                     exact = engine.exactness_error(X_cal_sub[:min(len(X_cal_sub), 32)])
                     candidates.append((score, -exact, engine))
-                    
-                except Exception as e:
-                    # Skip invalid configurations
+
+                except Exception:
                     continue
-    
+
     if not candidates:
         raise RuntimeError(f"no valid engine found for target_bpd={target_bpd}, role={role}")
-    
-    # Sort by score (higher is better), then by exactness (lower error is better)
+
     candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return candidates[0][2]
-
 
 def _search_target_engine(
     dim: int,
