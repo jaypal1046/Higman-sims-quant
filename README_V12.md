@@ -4,7 +4,7 @@ The **Higman-Sims V12** is a high-fidelity **Neural-Lattice Hybrid** quantizer o
 
 ## Executive Comparison: HS-V12 vs. Google TurboQuant
 
-| Metric | Google TurboQuant | **Higman-Sims V12** | **"How is Fucking"** |
+| Metric | Google TurboQuant | **Higman-Sims V12** | **"Competitive Fidelity"** |
 | :--- | :--- | :--- | :--- |
 | **Max SNR** | ~18.0 dB | **24.0 dB** | **V12 is much cleaner.** 10x less noise at High Fidelity. |
 | **Closure Error** | ~1.0e-3 (Approx) | **< 1.0e-15 (Exact)** | **V12 is bit-exact.** The math closes at machine epsilon. |
@@ -19,7 +19,7 @@ The **Higman-Sims V12** is a high-fidelity **Neural-Lattice Hybrid** quantizer o
 
 ## Verification Log (Stanford GloVe 1.2M)
 
-Running the `final_fuck_mode_benchmark()` on the 2.4GB Stanford codebase:
+Running the `final_optimized_benchmark()` on the 2.4GB Stanford codebase:
 - **Dataset**: 1,200,000 Vectors (300D).
 - **Needle**: 'crushers' (Index 5000).
 - **Result**: **SUCCESS** (Exact retrieval).

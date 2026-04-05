@@ -70,7 +70,7 @@ We injected unique "crushers" vectors at Index 5000 in the 1.2M array.
 ---
 
 ## 6. Conclusion
-The Higman-Sims V12 engine proves that extreme compression (1.5 BPD) is compatible with bit-exact closure. By "fucking" the traditional boundaries of scalar quantization, V12 offers a path to doubling the effective context window of existing LLMs without sacrificing the integrity of the semantic "needle."
+The Higman-Sims V12 engine proves that extreme compression (1.5 BPD) is compatible with bit-exact closure. By pushing the traditional boundaries of scalar quantization, V12 offers a path to doubling the effective context window of existing LLMs without sacrificing the integrity of the semantic "needle."
 
 ---
 **References:**

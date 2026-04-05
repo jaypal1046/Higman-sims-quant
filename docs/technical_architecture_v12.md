@@ -70,9 +70,9 @@ V12 is designed for **Massive Parallelism**:
 
 ---
 
-## 5. Summary of "Fuck Beyond" Status
+## 5. Summary of Beyond-SOTA Status
 We have successfully decoupled **Fidelity** from **Thinness**. V12 allows a runtime choice: 
 - **1.5 BPD** for edge devices.
 - **55.7 dB** for research-grade exactness.
 
-**The architecture is now fully finalized and "Fucking Better" than any existing commercial alternative.**
+**The architecture is now fully finalized and demonstrably superior to existing commercial alternatives.**
