@@ -65,9 +65,9 @@ class Untouchable_Core:
         return res.reshape(nv, -1)[:, :self.dim] * self.md + self.m
 
     def bpd(self) -> float:
-        # 8 stages * (8 bits index + 4 bits scalar) = 96 bits per 8D.
-        # 96 / 8 = 12.0 BPD.
-        return 12.0
+        # Each stage: 8 bits (index) + 4 bits (scalar) = 12 bits per 8D chunk.
+        # This equals exactly 1.5 Bits-Per-Dimension (BPD) per stage.
+        return float(self.stages * 1.5)
 
 if __name__ == "__main__":
     print("=== THE-UNTOUCHABLE V12: 12.0 BPD AT 40dB+ (8 STAGES) === ")

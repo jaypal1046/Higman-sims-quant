@@ -611,7 +611,7 @@ class V9Engine:
             local_codes = codes[:, col_mask].astype(np.int32)
             local_hat = np.zeros_like(local_codes, dtype=np.float64)
             positive = local_codes > 0
-            
+             
             # Map code [1..levels] to the log-center domain (0..1) then exponentiate
             if np.any(positive):
                 centers = (local_codes[positive].astype(np.float64) - 0.5) / levels
