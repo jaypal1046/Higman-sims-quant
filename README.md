@@ -8,8 +8,6 @@
 
 ## 🏆 The "God-Mode" Hybrid Shield
 
-## 🏆 The "God-Mode" Hybrid Shield
-
 | Algorithm | Dataset | BPD | SNR (dB) | Status |
 | :--- | :--- | :---: | :---: | :--- |
 | Google TurboQuant | KV Cache | 5.0 | 26.74 | Heuristic |
