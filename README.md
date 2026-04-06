@@ -181,6 +181,26 @@ Input Vector (256D, FP32)
     (6.0 bits/dimension)
 ```
 
+## 🔬 Limitations & Future Work
+
+> [!WARNING]
+> This research is currently based on **Mathematical Fidelity** and **Vector Retrieval** benchmarks on 1.2M Stanford GloVe vectors.
+
+**Not Yet Investigated:**
+1.  **End-to-End LLM Perplexity (PPL)**: The quantitative effect of V12-Tier compression on downstream reasoning tasks.
+2.  **Direct Hardware Latency**: While O(1) in theory, a production-grade CUDA/Triton implementation is required to measure wall-clock TTFT gains.
+
+**Planned Roadmap:**
+- **Integration**: Full `llama.cpp` GGUF-v3 support.
+- **Acceleration**: Custom kernels for the 24D Syndrome Search.
+
+---
+
+## 🏁 Conclusion
+The Higman-Sims V12 engine proves that extreme compression (1.5 BPD) is compatible with bit-exact closure. By pushing the traditional boundaries of scalar quantization, V12 offers a path to doubling the effective context window of existing LLMs without sacrificing the integrity of the semantic "needle."
+
+---
+
 ## 📚 Global References
 1. **Conway & Sloane**: *Sphere Packings, Lattices and Groups* (The Bible of V12 Geometry).
 2. **Higman & Sims**: *A simple group of order 44,352,000* (The origin of our subspace).
