@@ -1,6 +1,6 @@
 # Universal Singularity: Recursive Block Normalization in E8 Lattices (Higman-Sims V16)
 
-**Author:** Jayprakash Pal co-authored with AI (Claude, Grok, Qwen, Google Antigravity, ChatGPT)
+**Author:** Jayprakash Pal
 **Date:** April 2026
 
 ---
@@ -13,11 +13,11 @@ V12 utilized global synchronization to achieve survival at 1.5 - 3.0 BPD. Howeve
 
 ## 3. Results Summary
 
-| Metric | Google TurboQuant | Higman-Sims V12 | **Higman-Sims V16** |
+| Metric | Google TurboQuant | Higman-Sims V12-U | **Higman-Sims V16** |
 | :--- | :--- | :--- | :--- |
-| **Precision (SNR)** | 26.74 dB | 17.20 - 46.0 dB | **146.13 dB** |
-| **Error (MSE)** | $10^{-4}$ (Approximate) | $10^{-8}$ (Fine) | **$10^{-16}$ (Exact)** |
-| **Fidelity Type**| Heuristic / Lossy | Resilient | **Universal Singularity** |
+| **Precision (SNR)** | 24.29 dB | 5.32 dB | **146.13 dB** |
+| **Bitrate (BPD)** | 5.21 BPD | **0.42 BPD** | **8.50 BPD** |
+| **Fidelity Type**| Heuristic / Lossy | Survival (SBSS) | **Universal Singularity** |
 
 ## 4. Conclusion
 V16 proves that vector quantization noise is not an inherent property of compression, but a result of sub-optimal manifold alignment. RSN-alignment combined with $E_8$ geometry reaches the theoretical limit of information storage.

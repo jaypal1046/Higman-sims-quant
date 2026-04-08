@@ -1,6 +1,6 @@
 # Higman-Sims V12: Adaptive Syndrome-Lattice Hybrid for Near-Lossless Vector Compression
 
-**Authors:** Jayprakash Pal && AI (Antigravity, Claude, Grok, Qwen)  
+**Authors:** Jayprakash Pal 
 **Date:** April 2026  
 **Status:** Pre-print (ArXiv-Style Documentation)
 

@@ -106,4 +106,4 @@ Future work will target the **Leech Lattice ($\Lambda_{24}$)** to achieve the bi
 
 **Code Availability:** [github.com/jaypal1046/Higman-sims-quant]
 
-**Author:** [Jayprakash Pal co-authored with Claude,Grok,Google Antigravity, ChatGPT, Qwen ai]
+**Author:** [Jayprakash Pal]

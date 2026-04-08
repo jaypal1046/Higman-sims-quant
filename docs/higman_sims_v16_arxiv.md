@@ -1,6 +1,6 @@
 # Higman-Sims V16: High-Fidelity Hybrid E8 Lattice Quantization with Recursive Block-wise Normalization (RSN)
 
-**Authors:** Jayprakash Pal && AI (Antigravity, Claude, Grok, Qwen, ChatGPT)  
+**Authors:** Jayprakash Pal  
 **Date:** April 2026  
 **Status:** Pre-print (ArXiv-Style Documentation)
 
@@ -34,8 +34,9 @@ We validated V16 on the **Dolma 1.2M Common Crawl** 300D embedding dataset.
 
 | Dataset | Bitrate (BPD) | Mean SNR (dB) | MSE Floor |
 | :--- | :--- | :--- | :--- |
-| **KV-Cache (GPT-2)** | 8.50 BPD | 146.41 dB | $2.9 \times 10^{-16}$ |
-| **Dolma 1.2M** | 8.50 BPD | **146.13 dB** | **$3.5 \times 10^{-16}$** |
+| **HS V12-U (Dolma)** | **0.42 BPD** | **5.32 dB** | **Survival** |
+| **HS V16 (GPT-2)** | 8.50 BPD | 146.41 dB | $2.9 \times 10^{-16}$ |
+| **HS V16 (Dolma)** | 8.50 BPD | **146.13 dB** | **$3.5 \times 10^{-16}$** |
 
 ---
 

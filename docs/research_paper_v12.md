@@ -1,6 +1,6 @@
 # High-Fidelity Differential Manifold and Syndrome-Lattice Hybrid Quantization (Higman-Sims V12)
 
-**Author:** Jayprakash Pal && AI(Antigravity, Cloude, Grock and qwen)
+**Author:** Jayprakash Pal 
 **Date:** April 2026
 **Subject:** Advanced KV-Cache and Vector Compression (1.5 - 2.5 BPD)
 

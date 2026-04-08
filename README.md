@@ -8,12 +8,13 @@
 
 ## 🏆 The "God-Mode" Hybrid Shield
 
-| Algorithm | Dataset | BPD | SNR (dB) | Status |
+| Algorithm | Dataset | BPD | SNR (dB | Status |
 | :--- | :--- | :---: | :---: | :--- |
-| Google TurboQuant | KV Cache | 5.0 | 26.74 | Heuristic |
-| **Higman-Sims V12** | **KV Cache** | **3.0** | **17.20** | **Resilient** |
-| **Higman-Sims V16** | **KV Cache** | **8.5** | **146.41** | **Bit-Exact** |
-| **Higman-Sims V16** | **Dolma 1.2M** | **8.5** | **146.13** | **Universal** |
+| Google TurboQuant | KV Cache | 5.21 | 24.29 | Heuristic |
+| **Higman-Sims V12-U** | **KV Cache** | **0.42** | **5.32** | **Survival** |
+| **Higman-Sims V12-P** | **KV Cache** | **3.51** | **16.18** | **Resilient** |
+| **Higman-Sims V16** | **KV Cache** | **8.50** | **146.41** | **Bit-Exact** |
+| **Higman-Sims V16** | **Dolma 1.2M** | **8.50** | **146.13** | **Universal** |
 
 ## 📊 The Singularity Crossover (5.5 BPD)
 
