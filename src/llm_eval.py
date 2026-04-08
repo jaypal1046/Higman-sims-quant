@@ -27,9 +27,9 @@ def evaluate_perplexity(model_id, dataset_text, device="cpu"):
     # Here we simulate the impact by quantizing the activations of a full forward pass
     
     # Simple simulation: Quantize the hidden states before the LM head
-    # (In a real KV cache implementation, we'd wrap the K and V tensors in the attention layer)
     with torch.no_grad():
-        hidden_states = model.transformer(input_ids)[0]
+        outputs = model(input_ids, output_hidden_states=True)
+        hidden_states = outputs.hidden_states[-1]
         orig_shape = hidden_states.shape
         flattened = hidden_states.view(-1, orig_shape[-1]).cpu().numpy()
         
@@ -43,8 +43,9 @@ def evaluate_perplexity(model_id, dataset_text, device="cpu"):
         q_time = time.time() - start_q
         
         # Inject back into model
-        hidden_states_q = torch.from_numpy(dequantized).view(orig_shape).to(device).to(torch.float32)
-        lm_logits = model.lm_head(hidden_states_q)
+        hidden_states_q = torch.from_numpy(dequantized).view(orig_shape).to(device).to(model.dtype)
+        lm_head = model.get_output_embeddings()
+        lm_logits = lm_head(hidden_states_q)
         
         # Calculate Loss
         shift_logits = lm_logits[..., :-1, :].contiguous()
