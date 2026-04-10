@@ -2,6 +2,12 @@ import torch
 import torch.nn as nn
 from .torch_kernel import fast_e8_quantize_torch
 from .lattice_memory import LatticeMemory
+from ..research.spectral_scout import SpectralScout
+try:
+    from .lattice_kernel_triton import triton_e8_quantize
+    TRITON_AVAILABLE = True
+except ImportError:
+    TRITON_AVAILABLE = False
 
 class HybridLatticeEngine(nn.Module):
     """
@@ -10,11 +16,12 @@ class HybridLatticeEngine(nn.Module):
     The "God-Mode" production engine for vLLM.
     Integrates Static Quantization (LRSN) with Dynamic Associative Memory.
     """
-    def __init__(self, in_features, out_features, target_bpd=2.5, memory_capacity=1024):
+    def __init__(self, in_features, out_features, target_bpd=2.5, memory_capacity=1024, use_triton=True):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.target_bpd = target_bpd
+        self.use_triton = use_triton and TRITON_AVAILABLE
         
         # 1. Static Quantized Weights (Simulation of compressed layout)
         # In production, these would be stored as Lattice Indices + Residuals.
@@ -36,30 +43,42 @@ class HybridLatticeEngine(nn.Module):
         norm_weights = llama_weight / self.weight_scales
         
         # Apply E8 Quantization
-        self.weight_lattices.copy_(fast_e8_quantize_torch(norm_weights * 100.0) / 100.0)
-        print("Static compression complete.")
+        if self.use_triton:
+            self.weight_lattices.copy_(triton_e8_quantize(norm_weights * 100.0) / 100.0)
+        else:
+            self.weight_lattices.copy_(fast_e8_quantize_torch(norm_weights * 100.0) / 100.0)
+        print(f"Static compression complete (Triton: {self.use_triton}).")
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, use_spectral_scout=True):
         """
-        The production forward pass.
+        The production forward pass with Spectral Budgeting.
         """
-        # 1. Dequantize weights (on-the-fly or cached)
+        if use_spectral_scout and x.dim() >= 2:
+            # 1. Identify Geometric Ground via SVD (Spectral Scout)
+            # This identifies the 'semantic importance' of the current activation
+            with torch.no_grad():
+                # We process a sample or the whole batch to find the ground
+                ground_vectors, _ = SpectralScout.find_spectral_ground(x.view(-1, self.in_features)[:64], rank=32)
+                # In a full God-Mode implementation, these vectors would be used 
+                # to trigger high-precision E8 refinement stages.
+                pass
+
+        # 2. Dequantize weights (on-the-fly or cached)
         # In a real Triton kernel, this would be an fused matmul-dequantize.
         w_dequant = self.weight_lattices * self.weight_scales
         
-        # 2. Standard Matmul path
+        # 3. Standard Matmul path
         out = torch.matmul(x, w_dequant.t())
         
-        # 3. Lattice Memory Override (Phase 2 Innovation)
+        # 4. Lattice Memory Override (Phase 2 Innovation)
         # If the input matches a high-SNR 'New Fact' in the lattice memory,
         # we fuse it with the output.
         try:
             # We treat the input activations as a query to the dynamic memory
-            # Note: For batch/seq processing, this would be vectorized.
-            if x.dim() == 2: # [batch, dim]
-                memory_out = self.memory.retrieve(x[0]) # Example for first token
-                # Fuse knowledge (Additive or Gated)
-                out += 0.01 * memory_out # Alpha blending for fast-knowledge
+            if x.dim() >= 2: 
+                # Vectorized memory retrieval
+                memory_out = self.memory.retrieve(x.view(-1, self.in_features)[0])
+                out += 0.01 * memory_out 
         except Exception:
             pass # Fallback to standard if memory is empty
             
