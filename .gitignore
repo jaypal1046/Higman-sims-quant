@@ -9,6 +9,7 @@ build/
 target/
 .agents/*
 data/*
+.me.md
 
 # Dependencies
 .venv/
