@@ -9,10 +9,10 @@ import torch
 import numpy as np
 import pandas as pd
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from higman_sims_quant_v16 import Final_God_V16
-from higman_sims_quant_v17 import LatticeRSN_V17
-from higman_sims_quant_v18 import LatticeRSN_V18
-from higman_sims_quant_v19 import LatticeRSN_V19
+from ..core.v16 import Final_God_V16
+from ..core.v17 import LatticeRSN_V17
+from ..core.v18 import LatticeRSN_V18
+from ..core.v19 import LatticeRSN_V19
 import time
 
 def evaluate_ppl_tier(model_id, text, version, tier, device="cpu"):

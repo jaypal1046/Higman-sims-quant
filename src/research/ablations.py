@@ -1,5 +1,5 @@
 import numpy as np
-from higman_sims_quant_v16 import Final_God_V16, fast_e8_quantize
+from ..core.v16 import Final_God_V16, fast_e8_quantize
 import pandas as pd
 
 def run_ablation():

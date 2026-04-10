@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from higman_sims_quant_v16 import Final_God_V16
+from ..core.v16 import Final_God_V16
 import numpy as np
 import time
 

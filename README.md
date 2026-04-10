@@ -6,8 +6,6 @@
 
 **Lattice-RSN** is a near-lossless vector quantization framework for LLM KV-cache compression. By grounding compression in the **E8 Gosset Lattice** and introducing **Recursive Block-wise Normalization (RSN)**, the engine achieves bit-exact fidelity ($>146$ dB Peak SNR), effectively reaching the precision limit of 64-bit floating point.
 
-## 🏆 The "God-Mode" Hybrid Shield
-
 ## 🏆 The "Singularity" Benchmarks
 
 | Algorithm | Dataset | Bitrate (BPD) | Peak SNR (dB) | Status |
@@ -44,14 +42,14 @@ V16 was built for **Perfection**. It introduces **Recursive Block Normalization 
 | File | Description |
 |------|-------------|
 | `paper/main.tex` | Complete IEEE-format research paper |
-| `figure_residual_decay.png` | Figure 1: Hierarchical energy decay across 4 stages |
-| `figure_compression_ratio.png` | Figure 2: Compression efficiency vs baselines |
-| `figure_codebook_structure.png` | Figure 3: Learned orthogonal basis visualization |
+| `assets/figure_residual_decay.png` | Figure 1: Hierarchical energy decay across 4 stages |
+| `assets/figure_compression_ratio.png` | Figure 2: Compression efficiency vs baselines |
+| `assets/figure_codebook_structure.png` | Figure 3: Learned orthogonal basis visualization |
 
 ### Code & Scripts
 | File | Description |
 |------|-------------|
-| `generate_figures.py` | Script to reproduce all figures from log data |
+| `scripts/generate_figures.py` | Script to reproduce all figures from log data |
 | `src/` | Source code implementation |
 | `tests/` | Unit tests and validation scripts |
 
@@ -60,7 +58,7 @@ V16 was built for **Perfection**. It introduces **Recursive Block Normalization 
 |------|-------------|
 | `README.md` | This file - project overview |
 | `docs/` | Additional technical documentation |
-| `colab_testing.md` | Colab notebook testing guide |
+| `docs/guides/colab_testing.md` | Colab notebook testing guide |
 
 ## 🔬 V12 Technical Innovation
 
@@ -84,13 +82,13 @@ Leveraging the SVD-backbone of the context window to isolate "Semantic Noise" fr
 pip install matplotlib numpy seaborn
 
 # Generate all figures
-python generate_figures.py
+python scripts/generate_figures.py
 ```
 
 This will produce three publication-ready figures:
-- `figure_residual_decay.png` - Shows energy decay across stages
-- `figure_compression_ratio.png` - Compares compression rates
-- `figure_codebook_structure.png` - Visualizes learned orthogonal basis
+- `assets/figure_residual_decay.png` - Shows energy decay across stages
+- `assets/figure_compression_ratio.png` - Compares compression rates
+- `assets/figure_codebook_structure.png` - Visualizes learned orthogonal basis
 
 ### Compiling the Manuscript
 ```bash
@@ -222,7 +220,7 @@ The Higman-Sims V12 engine proves that extreme compression (1.5 BPD) is compatib
 1. **Conway & Sloane**: *Sphere Packings, Lattices and Groups* (The Bible of V12 Geometry).
 2. **Higman & Sims**: *A simple group of order 44,352,000* (The origin of our subspace).
 3. **Google Research**: *TurboQuant* (The baseline we annihilated).
-4. **HS-V12 Team**: *Research Paper: Higman-Sims V12 Quantization* (docs/research_paper_v12.md).
+4. **HS-V12 Team**: *Research Paper: Higman-Sims V12 Quantization* (docs/research/research_paper_v12.md).
 
 ---
 **Project Status**: High-Fidelity Research Prototype (V12) | **Fully Stable.**
@@ -235,7 +233,7 @@ The Higman-Sims V12 engine proves that extreme compression (1.5 BPD) is compatib
 
 Research prototype for hybrid vector quantization built around the Higman-Sims graph, its 22-dimensional spectral embedding, and a scalar residual stage.
 
-The main reference implementation for this README is [src/higman_sims_quant.py](src/higman_sims_quant.py). Later files such as `v2` through `v7` are exploratory variants and should be treated as experiments rather than settled results.
+The main reference implementation for this README is [src/core/v12.py](src/core/v12.py). Later files such as `v16.py` through `v19.py` (in `src/core/`) are exploratory variants and should be treated as experiments rather than settled results.
 
 ## Project Status
 
@@ -301,7 +299,7 @@ Exact timing and quality numbers will vary by machine, Python version, and rando
 From the repository root:
 
 ```python
-from src.higman_sims_quant import HybridQuantizer
+from src.core.v12 import HybridQuantizer
 import numpy as np
 
 qz = HybridQuantizer(dim=768, bits_residual=2, verbose=True)
@@ -321,7 +319,7 @@ print(f"Overhead: {qz.overhead_bits()} bits")
 ### 5. Use the raw 22D quantizer directly
 
 ```python
-from src.higman_sims_quant import HSQuantizer
+from src.core.v12 import HSQuantizer
 import numpy as np
 
 qz = HSQuantizer(bits_residual=2, verbose=True)
@@ -482,13 +480,12 @@ That is why the original implementation describes the coarse codebook as implici
 
 ```text
 src/
-  higman_sims_quant.py       Original HS implicit spectral quantizer
-  higman_sims_quant_v2.py    Follow-up experiment
-  higman_sims_quant_v3.py    Equal-bitrate diagnostics
-  higman_sims_quant_v4.py    Direction-first variant
-  higman_sims_quant_v5.PY    Historical experiment with known quality issues
-  higman_sims_quant_v6.py    E8-based reference prototype
-  higman_sims_quant_v7.py    Latest norm-split E8 research prototype
+  core/
+    v12.py                   Original HS implicit spectral quantizer
+    v16.py                   Follow-up experiment
+    v17.py                   Equal-bitrate diagnostics
+    v18.py                   Direction-first variant
+    v19.py                   E8-based reference prototype
 
 tests/
   *.test.py                  Construction and graph checks
@@ -542,13 +539,13 @@ Named tuple holding:
 
 ## Public Release Checklist
 
-If you are deciding whether to make the repository public, use [docs/PUBLIC_RELEASE_CHECKLIST.md](docs/PUBLIC_RELEASE_CHECKLIST.md).
+If you are deciding whether to make the repository public, use [legal/PUBLIC_RELEASE_CHECKLIST.md](legal/PUBLIC_RELEASE_CHECKLIST.md).
 
 ## Legal
 
-- License: [LICENSE](LICENSE)
-- Disclaimer: [DISCLAIMER.md](DISCLAIMER.md)
-- Terms and Conditions: [TERMS_AND_CONDITIONS.md](TERMS_AND_CONDITIONS.md)
+- License: [legal/LICENSE](legal/LICENSE)
+- Disclaimer: [legal/DISCLAIMER.md](legal/DISCLAIMER.md)
+- Terms and Conditions: [legal/TERMS_AND_CONDITIONS.md](legal/TERMS_AND_CONDITIONS.md)
 
 ## References
 
@@ -560,4 +557,4 @@ If you are deciding whether to make the repository public, use [docs/PUBLIC_RELE
 
 ## License
 
-This repository is licensed under the MIT License. See [LICENSE](LICENSE).
+This repository is licensed under the MIT License. See [legal/LICENSE](legal/LICENSE).
