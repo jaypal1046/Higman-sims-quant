@@ -11,6 +11,8 @@
 \usepackage{siunitx}
 \usepackage{microtype}
 \usepackage{setspace}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
 
 \onehalfspacing
 
@@ -20,9 +22,10 @@
 
 \author{
     \centering
-    Jayprakash S. Pal\thanks{jaypal1046@gmail.com $|$ ORCID: 0009-0007-2322-2270}\\
-    \small Independent Researcher $|$ HAL Science Pre-Print archive $|$ April 2026\\
-    \small \textbf{HAL Participant ID:} \texttt{jaypal}
+    Jayprakash S. Pal\\
+    \small Independent Researcher\\
+    \small \texttt{jayprakash.pal888@gmail.com}\\
+    \small \url{https://github.com/jaypal1046/Higman-sims-quant}
 }
 
 \maketitle
@@ -104,7 +107,7 @@ The interaction between the Spectral Scout and the Lattice Engine is defined bel
 \end{algorithmic}
 
 \subsection{Triton Operator Fusion}
-To eliminate dequantization latency, we implemented a fused \textbf{NVIDIA Triton} kernel. Unlike standard dequantizers that perform a separate global memory pass, our kernel fuses the E8-to-FP16 projection directly into the attention scoring loop. This "Operator Fusion" reduces global memory round-trips by 87.5\% and allows the KV cache to remain in L2/SRAM during the most compute-intensive phases of the transformer forward pass.
+To eliminate dequantization latency, we implemented a fused \textbf{Triton} kernel. Unlike standard dequantizers that perform a separate global memory pass, our kernel fuses the E8-to-FP16 projection directly into the attention scoring loop. This "Operator Fusion" reduces global memory round-trips by 87.5\% and enables efficient execution across diverse GPU architectures, including mobile and integrated graphics units, by keeping the KV cache in L2/SRAM during the forward pass.
 
 \section{Proof of Concept: 10M Token Stability}
 We validated the "Geometric Floor" theory through a series of extreme-context experiments using Llama-3.1-8B-Instruct.
@@ -142,8 +145,6 @@ Singularity-HS maintains $>50$~dB SNR across 10M tokens, showing competitive or 
     \label{fig:vram}
 \end{figure}
 
-\section{Software Availability}
-The core Singularity-HS suite, including the Triton-fused kernels and the LRSN quantizer engine, is open-sourced for community research at: \texttt{https://github.com/jaypal1046/Higman-sims-quant}.
 
 \section{Conclusion}
 Singularity-HS provides the essential infrastructure for multimodal agents by grounding quantization in the mathematical efficiency of E8 and spectral isolation.
@@ -152,7 +153,6 @@ Singularity-HS provides the essential infrastructure for multimodal agents by gr
 \begin{thebibliography}{9}
 \bibitem{conway} J.H. Conway and N.J.A. Sloane, \emph{Sphere Packings, Lattices and Groups}, 1998.
 \bibitem{triton} P. Tillet et al., ``Triton: An intermediate language and compiler for GPU programming,'' 2026.
-\bibitem{pal} J.S. Pal, ``Singularity-LRSN: Spectral Adaptive E8 Lattice Quantization,'' 2026.
 \bibitem{kivi} Z. Liu et al., ``KIVI: A Tuning-Free Asymmetric 2-Bit Quantization for KV Cache,'' 2024.
 \bibitem{gear} J. Kang et al., ``Gear: High-Throughput LLM Servicing,'' 2024.
 \bibitem{higman} D.G. Higman and C.C. Sims, ``A simple group of order 44,352,000,'' 1968.
