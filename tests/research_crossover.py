@@ -1,8 +1,12 @@
 import numpy as np
 import time, math, os, sys
+from pathlib import Path
 
-# Add root to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+ROOT = Path(__file__).resolve().parent
+while not (ROOT / "src").exists() and ROOT != ROOT.parent:
+    ROOT = ROOT.parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 from src.higman_sims_quant_v12 import Untouchable_Core as V12_Core
 from src.higman_sims_quant_v16 import Final_God_V16 as V16_Core

@@ -31,14 +31,14 @@ class LRSNQuantizer:
                     out_features=module.out_features,
                     target_bpd=target_bpd
                 )
+                engine = engine.to(device=module.weight.device, dtype=module.weight.dtype)
                 
                 # Transfer weights and Calibrate
                 with torch.no_grad():
-                    engine.load_from_llama(module.weight.data)
-                    if module.bias is not None:
-                        # HybridLatticeEngine currently doesn't have a bias register,
-                        # but we can add it or just ignore it for the POC.
-                        pass
+                    engine.load_from_llama(
+                        module.weight.data,
+                        module.bias.data if module.bias is not None else None,
+                    )
                 
                 # Replace module in the parent
                 parent_name = ".".join(name.split(".")[:-1])

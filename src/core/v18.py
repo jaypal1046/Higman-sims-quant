@@ -204,6 +204,6 @@ if __name__ == "__main__":
     
     print(f"SNR: {snr:.2f} dB | Real Entropy BPD: {bpd:.2f}")
     if bpd <= 3.0:
-        print("✅ SUCCESS: V18 breached the 3.0 BPD barrier.")
+        print("[OK] V18 breached the 3.0 BPD barrier.")
     else:
-        print(f"⚠️ WARNING: BPD {bpd:.2f} > 3.0.")
+        print(f"[WARN] BPD {bpd:.2f} > 3.0.")

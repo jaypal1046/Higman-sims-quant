@@ -1,44 +1,32 @@
-# Technical Architecture: Higman-Sims V16 (Singularity Edition)
+# Technical Architecture: Higman-Sims V16
 
-**System Name:** Recursive Block-Normalizing Lattice Hybrid (RBNL)
-**Core Engine:** V16 'THE-SINGULARITY'
-**Target:** 100dB - 150dB SNR @ 7.0 - 15.0 BPD
+## Summary
 
----
+V16 is a higher-fidelity variant in this repository. Its main change relative to earlier versions is moving normalization from the whole tensor to smaller local blocks before E8 projection.
 
-## 1. System-Level Architecture
+## Design Goal
 
-The V16 architecture moves the centering logic from the "Whole Tensor" level down to the "8D Block" level.
+- Explore whether local normalization helps high-bitrate reconstruction quality.
+- Accept extra metadata overhead in exchange for lower reconstruction error.
+- Provide a cleaner comparison point against lower-bitrate variants such as V12.
 
-### 1.1. Data Flow Diagram
-```mermaid
-graph TD
-    Input[Input Tensor: FP32] --> Partition[8D Block Partitioning]
-    Partition --> RSN[Recursive Block Normalization]
-    
-    subgraph RSN_Loop[RSN Module]
-        Center[Local Mean Centering]
-        Scale[Local Scale Normalization]
-        E8[E8 Gosset Projection]
-        Refine[Recursive Residual Scaling]
-        Center --> Scale --> E8 --> Refine --> Center
-    end
-    
-    Refine --> Combine[Bit-Exact Reconstruction]
-    Combine --> Output[Output: 146dB SNR / MSE 3.5e-16]
-```
+## Pipeline
 
-## 2. Mathematical Innovations
+1. Partition the tensor into 8D blocks.
+2. Compute local mean and scale for each block.
+3. Normalize each block.
+4. Project onto the E8 lattice.
+5. Apply recursive residual refinement across multiple stages.
+6. Reconstruct using the stored local statistics.
 
-### 2.1. The 5.5 BPD Crossover Paradox
-In high-dimensional compression, there is a "Scale Tax." Every bit spent on local means/variances is a bit lost for data indices.
-- At **3.0 BPD**, V12 wins because it pays 0 bits for local scales.
-- At **8.5 BPD**, V16 wins because the 4.0 bits of "Scale Tax" unlock $10^8$x more precision by perfectly centering the E8 lattice points.
+## Interpretation
 
-### 2.2. Distribution-Agnostic Stability
-Because RSN centers every block locally, V16 is immune to the underlying data distribution. This is proven by the identical performance on both **GPT-2 KV Cache** (Dynamic) and **Dolma Common Crawl** (Static) datasets.
+The working hypothesis behind V16 is that local centering reduces the mismatch between the activation distribution and the lattice geometry. In local experiments inside this repo, that tends to help reconstruction quality once the bitrate budget is high enough to absorb the metadata cost.
 
----
+## Caveat
 
-## 3. Summary of Status
-The V16 architecture is the **Current Production Master**. It is recommended for all H100/A100 deployments where absolute reasoning fidelity (zero drift) is required.
+The repo contains strong reconstruction results for V16, but those results should not be read as proof of broad model-level superiority. They are best treated as evidence that the design is worth further evaluation.
+
+## Status
+
+V16 is a research implementation with useful local validation coverage. It is not yet a production deployment recommendation on its own.

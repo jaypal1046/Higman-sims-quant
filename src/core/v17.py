@@ -177,6 +177,6 @@ if __name__ == "__main__":
     print(f"Real Entropy BPD: {bpd:.2f}")
     
     if snr > 147 and bpd < 6.0:
-        print("✅ SUCCESS: V17 reached God-Mode thresholds (>147dB, <6 BPD).")
+        print("[OK] V17 reached God-Mode thresholds (>147dB, <6 BPD).")
     else:
-        print("⚠️ WARNING: Performance missed target.")
+        print("[WARN] Performance missed target.")

@@ -18,7 +18,7 @@
 
 \begin{document}
 
-\title{Singularity-HS: Spectral Adaptive Lattice-RSN for 10M-Token Multimodal Contexts}
+\title{E8 Lattice Quantization with Hierarchical Residual Normalization for Causal Language Model KV Cache Compression}
 
 \author{
     \centering
@@ -31,132 +31,139 @@
 \maketitle
 
 \begin{abstract}
-As transformer-based context windows extend toward the 10-million token milestone, Key-Value (KV) cache memory requirements have become the primary bottleneck for multimodal inference. We propose \textbf{Singularity-HS}, a spectral-adaptive quantization framework grounded in the $E_8$ Gosset lattice. We provide a \textbf{Geometric Rigidity Proof} demonstrating that Lattice-Recursive Residual Normalization (LRSN) coupled with Higman-Sims symmetry ensures zero-drift at extreme contexts. By combining SVD-based error isolation with $E_8$ tiling, we achieve stable compression rates of \SI{2.0}{BPD} while maintaining near bit-exact fidelity for high-energy semantic channels. Our system demonstrates an \textbf{87.5\% VRAM reduction} over FP16 baselines. Through preliminary results on Video-MME and Perplexity Stability analysis, we demonstrate that Singularity-HS shows competitive or superior SNR stability and retrieval recall compared to contemporary baselines like TurboQuant and KIVI.
+This paper evaluates an $E_8$ lattice-based vector quantization framework with Hierarchical Residual Normalization (Lattice-RSN) for Key-Value (KV) cache compression in transformer-based causal language models. Large-scale transformer deployment is heavily restricted by the memory footprint of the KV cache. To address this bottleneck, we analyze the scaling behavior of GQA architectures and evaluate the reconstruction fidelity of our quantizer. The framework is tested on a GPT-2 (124M parameter) model proxy, quantizing Layer 0 Key tensors under a 2.0 bits per dimension (BPD) budget constraint. The V19 calibration allocates 0.8750 BPD for metadata and 2.9914 BPD for base stages, dynamically triggering sparsified indexing to maintain the 2.0 BPD target limit. The quantized KV cache yields a reconstruction signal-to-noise ratio (SNR) of 52.07 dB. Logit divergence analysis shows that this reconstruction fidelity limits the projected next-token perplexity increase to under 0.0960\%, validating the precision of the recursive tiling. We present mathematical scaling boundaries demonstrating that a 10M-token context window on Llama-3.1-8B requires 1.22 Terabytes (TB) of VRAM in FP16, which is compressed to 167.85 Gigabytes (GB) using our framework. Commodity hardware constraints restrict empirical runs to proxy evaluations, and we map out the distributed architecture requirements for scaling.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Lattice Quantization, E8 Lattice, KV Cache, 10M Token Context, Spectral Isolation, SVD, Triton Kernels, Multimodal AI
+Vector Quantization, E8 Lattice, KV Cache, Causal Language Models, Residual Normalization, Memory Constraints
 \end{IEEEkeywords}
 
 \section{Introduction}
-Large Language Models (LLMs) are rapidly evolving toward "infinite context" windows. However, the Key-Value (KV) cache scales linearly with sequence length, creating a physical barrier to deployment. Conventional INT8 methods suffer from \textbf{Rounding Divergence} at extreme lengths (10M+ tokens). We present \textbf{Singularity-HS}, a framework that achieves zero-drift at 2.0 BPD through Lattice-Recursive Residual Normalization. This work contributes both a theoretical manifold stability proof and a high-performance Triton implementation.
+The scaling of context windows in autoregressive language models imposes heavy constraints on memory footprint during inference. The Key-Value (KV) cache storage scales as $\mathcal{O}(N)$ with respect to sequence length, quickly exceeding GPU memory limits during long-sequence generation. Quantization of these activations is necessary to minimize hardware requirements.
+
+However, low-bitrate quantization (<3.0 BPD) using scalar methods introduces significant rounding error. This cumulative noise shifts key states and degrades attention score calculations, leading to decay in model perplexity. This paper presents an evaluation of an $E_8$ lattice-based recursive quantization engine designed to enforce a strict geometric constraint on reconstruction error while adhering to low bitrates.
 
 \section{Related Work}
-Our work stands at the intersection of vector quantization and long-context memory optimization. \textbf{KIVI} introduced asymmetric 2-bit quantization but suffered from SNR collapse at 10M tokens. \textbf{TurboQuant} (Zandieh et al., 2026) achieved near-optimal distortion rates but relied on online scalar adjustment. Singularity-HS differentiates by using the \textbf{E8 Lattice}---the densest packing in 8 dimensions---ensuring a rigid, drift-free geometric floor that remains stable across millions of attention steps.
+Vector quantization methods reduce activation storage overhead by projecting blocks of data onto pre-computed codebooks or algebraic structures. Uniform scalar quantization models, such as INT8 or INT4, fail to retain signal fidelity below 3.0 BPD. 
 
-\section{Notation \& Preliminaries}
-We adopt the following mathematical conventions throughout this paper:
+Lattice-based quantization schemes project multidimensional vectors onto geometric structures such as the $E_8$ lattice, which provides the densest sphere packing in eight dimensions. While traditional vector quantization schemes (e.g., KIVI, TurboQuant) employ online scalar scaling or polar coordinate transforms to address outliers, they often introduce dynamic metadata overhead that limits bit-rate reduction. The proposed framework differs by employing hierarchical block normalizations combined with a dynamic multi-stage residual solver.
+
+\section{Methodology}
+The quantization pipeline partitions the input activation tensor $\mathbf{X} \in \mathbb{R}^{d}$ into eight-dimensional blocks.
+
+\subsection{Hierarchical Normalization}
+The activations are scaled hierarchically to resolve local block differences without incurring high metadata storage costs:
+\begin{enumerate}
+    \item \textbf{Global Normalization}: Compute the mean $\mu_{global}$ and standard deviation $\sigma_{global}$ over 32-dimensional segments of the activation vectors.
+    \item \textbf{Local Block Scaling}: Compute the local standard deviation $\sigma_i$ over each sub-block of 8 dimensions.
+    \item \textbf{Subspace centering}: The normalized block is represented as:
+    \begin{equation}
+        \mathbf{x}' = \frac{\mathbf{x} - \mu_{global}}{\sigma_{global} \cdot \sigma_i}
+    \end{equation}
+\end{enumerate}
+
+\subsection{$E_8$ Lattice Projection}
+The normalized coordinates are projected onto the nearest point in the $E_8$ lattice ($\Lambda_8$). The projection $Q_{\Lambda_8}(\mathbf{w})$ for $\mathbf{w} \in \mathbb{R}^8$ is resolved using the Conway-Sloane rounding algorithm. The output is mapped onto a codebook index.
+
+\subsection{Dynamic Multi-Stage Residual Solving}
+At stage $k$, the residual error vector is calculated as:
+\begin{equation}
+    \mathbf{R}_k = \mathbf{X} - Q(\mathbf{X})
+\end{equation}
+Subsequent stages normalize and re-quantize the residual error vector. A dynamic budget allocator determines stage densities to meet target BPD constraints.
+
+\section{Implementation}
+The test framework is implemented in Python using PyTorch and SciPy. We verify the quantization performance using the \texttt{openai-community/gpt2} (124M parameters) model. The evaluation process is structured as follows:
+\begin{itemize}
+    \item \textbf{Data Extraction}: The causal model executes a forward pass on a 30-token prompt. Key cache states for Layer 0 are intercepted directly from the model's \texttt{past\_key\_values} output to ensure compatibility across system libraries.
+    \item \textbf{Calibration}: The Layer 0 key tensor, with shape \texttt{(batch\_size, num\_heads, sequence\_length, head\_features)}, is flattened and used to calibrate the scaling parameters of the quantizer.
+    \item \textbf{Quantization}: The quantizer evaluates the signal under a target bitrate constraint of 2.0 BPD. 
+\end{itemize}
+
+\section{Results}
+The Lattice-RSN quantizer was evaluated on a GPT-2 Layer 0 Key cache tensor containing 3,840 elements, and VRAM scaling boundaries were evaluated analytically for larger contexts.
+
+\subsection{V19 Calibration Allocations}
+The V19 dynamic entropy solver calculated the following bit expenditures to satisfy the 2.0 BPD budget:
+\begin{itemize}
+    \item \textbf{Metadata Allocation}: 0.8750 BPD (Hierarchical 32-D block statistics)
+    \item \textbf{Base Calibration (2 Dense Stages)}: 2.9914 BPD
+    \item \textbf{Stage 1 Indexing}: Automatically sparsified to meet target budget
+    \item \textbf{Refinement Stages (2+)}: 0.00\% active density (deactivated to prevent budget overflow)
+\end{itemize}
+
+\subsection{Reconstruction Metrics}
+The signal reconstruction metrics are reported in Table~\ref{tab:results}.
+
 \begin{table}[h]
 \centering
-\caption{Notation Table}
-\label{tab:notation}
-\begin{tabular}{ll}
+\caption{KV Cache Reconstruction Performance}
+\label{tab:results}
+\begin{tabular}{llccc}
 \toprule
-\textbf{Symbol} & \textbf{Geometric Definition} \\ \midrule
-$\mathbf{X}$ & Input Activation Tensor $\mathbf{X} \in \mathbb{R}^{n \times d}$ \\
-$\Lambda_8$ & E8 Gosset Lattice ($\SI{8}{D}$ packing) \\
-$\sigma_i$ & Spectral energy coefficients \\
-$Q_{E8}(\cdot)$ & Lattice Quantization Projection \\
-$\epsilon$ & Singularity Threshold ($< 10^{-15}$) \\ \bottomrule
+\textbf{Model Target} & \textbf{Quantization Method} & \textbf{Target BPD} & \textbf{Measured BPD} & \textbf{Reconstruction SNR (dB)} \\
+\midrule
+GPT-2 Layer 0 Key & Lattice-RSN V19 & 2.00 & 2.00 & 52.07 \\
+\bottomrule
 \end{tabular}
 \end{table}
 
-\section{Theoretical Framework}
+\subsection{Projected Logit Shift}
+Calculating the logit divergence over the next-token probability distribution yielded the following projection:
+\begin{itemize}
+    \item \textbf{Mean Squared Error (MSE)}: $< 1.0 \times 10^{-5}$
+    \item \textbf{Projected Perplexity Increase}: $< 0.0960\%$
+\end{itemize}
 
-\subsection{Geometric Rigidity (Voronoi Tiling)}
-A primary cause of SNR collapse in long-context models is "Manifold Jitter"—the cumulative displacement of KV vectors during successive quantization steps. Unlike scalar quantization (which uses hypercube cells), Singularity-HS tiles the activation manifold with \textbf{E8 Voronoi Cells}. 
-\newtheorem{theorem}{Theorem}
-\begin{theorem}[Bound on Manifold Drift]
-For any vector $\mathbf{v} \in \mathbb{R}^8$, the $E_8$ quantization error is bounded by the covering radius $R(\Lambda_8) = 1$. The maximum quantization noise energy is fixed at:
+\subsection{VRAM Scaling and Capacity Analysis}
+To evaluate scaling bounds, we calculate the VRAM required to store the KV cache for the Llama-3.1-8B architecture (32 layers, 8 KV heads, 128 head dimension) across sequence lengths up to 10M tokens. Table~\ref{tab:vram_scaling} reports the comparison between FP16 baseline precision (16.0 BPD) and the proposed Lattice-RSN quantization (target 2.2 BPD including metadata).
+
+\begin{table}[h]
+\centering
+\caption{Llama-3.1-8B KV Cache VRAM Scaling Comparison}
+\label{tab:vram_scaling}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Context Length} & \textbf{FP16 VRAM (GB)} & \textbf{Lattice-RSN VRAM (GB)} & \textbf{Memory Reduction} \\
+\midrule
+0.1M & 15.62 & 2.15 & 86.2\% \\
+1.0M & 122.07 & 16.78 & 86.2\% \\
+4.0M & 488.28 & 67.14 & 86.2\% \\
+10.0M & 1220.70 & 167.85 & 86.2\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+The empirical results demonstrate that E8 lattice-based vector quantization with hierarchical normalization can preserve signal fidelity (52.07 dB SNR) at low bitrates. However, the VRAM scaling analysis reveals critical physical limits.
+
+On a standard commodity GPU node containing a single NVIDIA T4 GPU (15 GB VRAM), the model weights of Llama-3.1-8B in INT4 precision consume approximately 5.5 GB, leaving 9.5 GB for execution. At a target compression of 2.2 BPD, the maximum supportable sequence length on this node is mathematically bounded at:
 \begin{equation}
-    D_{max} = \min_{\lambda \in \Lambda_8} \| \mathbf{v} - \lambda \|^2 \le 1.0
+    N_{max} = \frac{9.5 \times 10^9 \text{ bytes}}{2 \times 32 \times 8 \times 128 \times 0.275 \text{ bytes}} \approx 526,120 \text{ tokens}
 \end{equation}
-By grounding the reconstruction in the rigid geometry of $\Lambda_8$, we establish a "Geometric Floor" that prevents noise from scaling with context length.
-\end{theorem}
-
-\subsection{The Higman-Sims Projection Lemma}
-To protect semantic integrity, we leverage the \textbf{Higman-Sims Sporadic Group} ($HS$) of order 44,352,000. $HS$ acts on a 22D subspace of the Leech Lattice. By identifying the "steering manifold" of the LLM via Spectral Scouting and projecting it into this 22D symmetric space, we ensure that critical reasoning pathways are hosted in an "Untouchable Manifold" protected from quantization noise.
-
-\subsection{Information Singularity (Recursion)}
-By calculating residual error $R = X - Q(X)$ and recursively re-quantizing, we reach the Information Singularity.
-\newtheorem{lemma}{Lemma}
-\begin{lemma}[Geometric Convergence]
-Let $R_k$ be the residual error after stage $k$. For an $E_8$ quantizer with $b$ bits per dimension, the energy decay follows:
+Even assuming zero weight footprint (using the full 15.0 GB capacity of the GPU solely for KV cache), the absolute upper bound of sequence length on a single T4 node is:
 \begin{equation}
-    \| R_{k+1} \|^2_2 \le 2^{-2b} \cdot \| R_k \|^2_2 + \mathcal{O}(\gamma)
+    N_{max, cache} = \frac{15.0 \times 10^9 \text{ bytes}}{2 \times 32 \times 8 \times 128 \times 0.275 \text{ bytes}} \approx 830,715 \text{ tokens}
 \end{equation}
-where $\gamma$ is the spectral gap defined by the HS manifold.
-\end{lemma}
 
-\section{Methodology: The Singularity-HS Engine}
+Consequently, empirical evaluation of a 10M token context window or video processing workloads (e.g., Video-MME) is physically impossible on single commodity nodes. A 10M context at 2.2 BPD requires a minimum of 167.85 GB of dedicated VRAM, necessitating a multi-GPU cluster (e.g., $2 \times$ H100 80GB or $1 \times$ H100 NVL 188GB).
 
-\subsection{Algorithmic Formalization}
-The interaction between the Spectral Scout and the Lattice Engine is defined below:
-
-\begin{algorithmic}
-\STATE \textbf{Algorithm 1: Singularity-HS Hybrid Engine}
-\STATE \textbf{Input:} Full-precision activations $\mathbf{X}_{fp16}$
-\STATE \textbf{1. Spectral Scouting:} Compute rSVD $\rightarrow \mathbf{U}, \Sigma, \mathbf{V}^\top$
-\STATE \textbf{2. Symmetry Mapping:} Identify $\sigma_i > \epsilon$ and project to HS-manifold.
-\STATE \textbf{3. Recursive Lattice Tiling:}
-\FOR{stage $s=1$ to $N$}
-\STATE $\hat{\mathbf{R}}_i \gets Q_{E8}(\mathbf{R}_{i-1} / \sigma)$
-\STATE $\hat{\mathbf{X}} \gets \hat{\mathbf{X}} + \hat{\mathbf{R}}_i$
-\ENDFOR
-\STATE \textbf{Output:} Compressed 2.0 BPD KV Cache $\hat{\mathbf{X}}$
-\end{algorithmic}
-
-\subsection{Triton Operator Fusion}
-To eliminate dequantization latency, we implemented a fused \textbf{Triton} kernel. Unlike standard dequantizers that perform a separate global memory pass, our kernel fuses the E8-to-FP16 projection directly into the attention scoring loop. This "Operator Fusion" reduces global memory round-trips by 87.5\% and enables efficient execution across diverse GPU architectures, including mobile and integrated graphics units, by keeping the KV cache in L2/SRAM during the forward pass.
-
-\section{Proof of Concept: 10M Token Stability}
-We validated the "Geometric Floor" theory through a series of extreme-context experiments using Llama-3.1-8B-Instruct.
-
-\subsection{Needle-in-a-Haystack Retrieval}
-Singularity-HS achieves **98.4\% retrieval accuracy** at 10 million sequence lengths. In contrast, scalar-based baselines like KIVI exhibit a "Recall Horizon" at approximately 4.2 million tokens, beyond which cumulative rounding error destroys the pointer-mechanisms of the attention layers.
-
-\subsection{Perplexity Stability (Semantic Decay)}
-We measured the perplexity drift over a 10M-token sliding window. Singularity-HS maintains a perplexity increase of **< 0.12\%** relative to the FP16 baseline. This indicates that the semantic manifold of the model is not just physically compressed, but geometrically "fixed" in a way that preserves long-range reasoning.
-
-\section{Ablation Studies}
-Removing SVD Isolation leads to a 22.4\% drop in recall. Removing Recursive RSN collapses the SNR floor to 12.5 dB, proving that flat E8 tiling is insufficient without recursive refinement.
-
-\section{Results \& Comparison}
-Singularity-HS maintains $>50$~dB SNR across 10M tokens, showing competitive or superior performance to TurboQuant and KIVI across both Video-MME and LongBench-Chat benchmarks. \footnote{High-fidelity V16 modes reach 146 dB SNR on calibration sets; end-to-end PPL verification is ongoing.}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.7\linewidth]{figure_snr_stability.png}
-    \caption{Long-context SNR stability comparison across 10M tokens.}
-    \label{fig:snr}
-\end{figure}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.7\linewidth]{figure_evolution_trajectory.png}
-    \caption{Evolutionary Trajectory from V12 to V19.}
-    \label{fig:evolution}
-\end{figure}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.7\linewidth]{figure_vram_scaling.png}
-    \caption{VRAM utilization at 10M tokens. Footprint reduced by 87.5\%.}
-    \label{fig:vram}
-\end{figure}
-
+\textit{Limitations}:
+\begin{itemize}
+    \item The model evaluation is restricted to a small-scale model (GPT-2, 124M parameters) on Layer 0 attention states over a limited sequence context.
+    \item Actual execution results on Llama-3.1-8B weights, multi-million token retrieval recalls, and Video-MME benchmarks were not completed due to memory bounds.
+    \item Triton GPU kernel implementation and SVD outlier protection benchmarks are not integrated into the current evaluation pipeline.
+\end{itemize}
 
 \section{Conclusion}
-Singularity-HS provides the essential infrastructure for multimodal agents by grounding quantization in the mathematical efficiency of E8 and spectral isolation.
+This study verified that E8 lattice-based quantization combined with Hierarchical Residual Normalization achieves a 52.07 dB reconstruction SNR at a bitrate of 2.0 BPD on a GPT-2 proxy. The resulting signal distortion restricts next-token projected perplexity drift to under 0.0960\%. Scaling analysis indicates that while a 10M token context requires 1.22 TB in FP16, it is compressible to 167.85 GB at 2.2 BPD, requiring a multi-GPU node for verification.
 
-\bibliographystyle{ieeetr}
-\begin{thebibliography}{9}
-\bibitem{conway} J.H. Conway and N.J.A. Sloane, \emph{Sphere Packings, Lattices and Groups}, 1998.
-\bibitem{triton} P. Tillet et al., ``Triton: An intermediate language and compiler for GPU programming,'' 2026.
-\bibitem{kivi} Z. Liu et al., ``KIVI: A Tuning-Free Asymmetric 2-Bit Quantization for KV Cache,'' 2024.
-\bibitem{gear} J. Kang et al., ``Gear: High-Throughput LLM Servicing,'' 2024.
-\bibitem{higman} D.G. Higman and C.C. Sims, ``A simple group of order 44,352,000,'' 1968.
-\bibitem{zandieh} A. Zandieh et al., ``TurboQuant: Online Vector Quantization,'' 2026.
-\end{thebibliography}
+\section*{References}
+\begin{enumerate}
+    \item Conway, J. H., & Sloane, N. J. A. (1998). \textit{Sphere Packings, Lattices and Groups} (3rd ed.). Springer.
+    \item Liu, Z., et al. (2024). \textit{KIVI: A Tuning-Free Asymmetric 2-Bit Quantization for KV Cache}.
+    \item Higman, D. G., & Sims, C. C. (1968). A simple group of order 44,352,000. \textit{Michigan Mathematical Journal}, 15(1), 110-113.
+    \item Zandieh, A., et al. (2026). \textit{TurboQuant: Online Vector Quantization}. Preprint.
+\end{enumerate}
 
 \end{document}

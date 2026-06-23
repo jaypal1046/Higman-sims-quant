@@ -1,560 +1,111 @@
-# Lattice-RSN: Recursive Residual Normalization in E8-Space
+# Lattice-RSN for KV Cache Quantization
 
-[![Status](https://img.shields.io/badge/Status-Singularity_Void_V18-red?style=for-the-badge)]()
-[![SNR](https://img.shields.io/badge/Max_SNR-154.3_dB-success?style=for-the-badge)]()
-[![BPD](https://img.shields.io/badge/Efficiency-2.55_BPD-red?style=for-the-badge)]()
+Lattice-RSN is a research prototype for KV-cache quantization built around E8 lattice projection, recursive residual refinement, and several normalization strategies explored across `v12` through `v19`.
 
-**Lattice-RSN** is a near-lossless vector quantization framework for LLM KV-cache compression. By grounding compression in the **E8 Gosset Lattice** and introducing **Recursive Block-wise Normalization (RSN)**, the engine achieves bit-exact fidelity ($>146$ dB Peak SNR), effectively reaching the precision limit of 64-bit floating point.
+The project is interesting because it treats low-bitrate and high-fidelity regimes as different problems instead of forcing one codec design to cover everything. The current repository contains working quantizers, validation scripts, and exploratory integration work for transformer inference.
 
-## 🏆 The "Singularity" Benchmarks
+## Current Status
 
-| Algorithm | Dataset | Bitrate (BPD) | Peak SNR (dB) | Status |
-| :--- | :--- | :---: | :---: | :--- |
-| Lattice-RSN (V16) | Pythia-160M | 8.10 | 146.93 | BIT-EXACT |
-| **Lattice-RSN (V17)** | **OPT-125M** | **6.76** | **154.31** | **SINGULARITY** |
-| **Lattice-RSN (V19)** | **GPT-2 (Extreme)** | **2.93** | **53.10** | **GOD-MODE** |
+- This is an active research prototype, not a production codec.
+- The core quantizers run and reproduce the local reconstruction results in this repo.
+- Preliminary end-to-end cache evaluation is now available for short teacher-forced autoregressive runs.
+- Hardware latency, serialized codec size, and broad model-level benchmarking are still incomplete.
 
-> TurboQuant: Redefining AI efficiency with extreme compression.
+## What Is In The Repo
 
+- `src/core/v12.py` to `src/core/v19.py`
+  Different quantization variants with different bitrate and fidelity trade-offs.
+- `src/research/llm_eval.py`
+  End-to-end autoregressive evaluation with quantized `past_key_values`.
+- `src/engine/`
+  Early runtime and integration experiments for PyTorch, Triton, and Hugging Face layer replacement.
+- `tests/`
+  Validation scripts, benchmarks, and compatibility checks.
+- `docs/research/`
+  Research notes and architecture summaries.
 
-## 📊 The Singularity Crossover (5.5 BPD)
+## Main Idea
 
-- **V12 Mode (< 5.5 BPD)**: Uses **Global Scaling** to achieve **17.20 dB SNR @ 3.0 BPD** (resilient at extreme space).
-- **V16 Mode (>= 5.5 BPD)**: Enables **Local RSN** to achieve **146.41 dB SNR @ 8.5 BPD** (bit-exact singularity).
+The project explores three linked ideas:
 
-## 🪐 The Evolution of "God-Mode" (V12 vs V16)
+1. Partition activations into 8D chunks and project them onto the E8 lattice.
+2. Normalize either globally or locally before quantization, depending on bitrate regime.
+3. Add recursive residual refinement so that high-bitrate modes can drive reconstruction error very low.
 
-The bridge between V12 and V16 is a transition from **Resilient Approximation** to **Absolute Singularity**.
+The earlier `v12` path emphasizes aggressive compression with limited metadata. The later `v16` to `v19` paths explore more local normalization and staged refinement to improve fidelity.
 
-### 1. V12: The "Survival" Baseline
-V12 was built for the "Information Desert." By using **Global Scaling**, it avoids wasting bits on local metadata. At 3.0 BPD, where localized engines (like V16) collapse into noise, V12 maintains a 17.2 dB signal floor. Use V12 when VRAM is critically low and you must scale to millions of tokens on edge hardware.
+## What The Current Evidence Supports
 
-### 2. V16: The "Singularity" Engine
-V16 was built for **Perfection**. It introduces **Recursive Block Normalization (RSN)**. This adds a "metadata tax" (4 bits/dim), but it allows the $E_8$ lattice to reach **Bit-Exact Fidelity (>100dB)**. Once the budget exceeds 5.5 BPD, V16 enters "God-Mode," which means the model's attention mechanism functions exactly as it would in float32.
+Local results in this repository suggest that the approach is promising:
 
-### 3. The Verdict
-- **VRAM is Empty?** → Hybrid switches to **V12** (Global Survival).
-- **VRAM is Standard?** → Hybrid switches to **V16** (Bit-Exact Singularity).
+- Reconstruction-focused tests reach very high SNR in the higher-bitrate variants.
+- The PyTorch E8 kernel matches the NumPy reference in parity checks.
+- The end-to-end evaluator in `src/research/llm_eval.py` now quantizes the KV cache inside an actual autoregressive loop.
 
-## 📁 Repository Contents
+Example short-run results from the current local GPT-2 evaluation:
 
-### Research Paper & Figures
-| File | Description |
-|------|-------------|
-| `paper/main.tex` | Complete IEEE-format research paper |
-| `assets/figure_residual_decay.png` | Figure 1: Hierarchical energy decay across 4 stages |
-| `assets/figure_compression_ratio.png` | Figure 2: Compression efficiency vs baselines |
-| `assets/figure_codebook_structure.png` | Figure 3: Learned orthogonal basis visualization |
+- `v19`, 96 tokens, teacher-forced streaming:
+  baseline PPL `50.188924`, quantized PPL `50.184533`, top-1 agreement `98.95%`
+- `v19`, 64 tokens, teacher-forced streaming:
+  baseline PPL `80.140889`, quantized PPL `80.011448`, top-1 agreement `100.00%`
+- `v16`, 64 tokens, teacher-forced streaming:
+  baseline PPL `80.140889`, quantized PPL `80.140813`, top-1 agreement `100.00%`
 
-### Code & Scripts
-| File | Description |
-|------|-------------|
-| `scripts/generate_figures.py` | Script to reproduce all figures from log data |
-| `src/` | Source code implementation |
-| `tests/` | Unit tests and validation scripts |
+These runs are useful because they show that the quantized-cache path can operate end to end without obvious degradation in short tests. They should still be treated as preliminary rather than definitive.
 
-### Documentation
-| File | Description |
-|------|-------------|
-| `README.md` | This file - project overview |
-| `docs/` | Additional technical documentation |
-| `docs/guides/colab_testing.md` | Colab notebook testing guide |
+## What Is Not Yet Proven
 
-## 🔬 V12 Technical Innovation
+The repository does not yet prove that this is the best KV-cache quantization method.
 
-### 1. The E8 Gosset Engine
-The fundamental 8-dimensional unit of space-packing. V12 uses the 240 minimal vectors of the $E_8$ lattice to minimize quantization noise in every 8D chunk.
+Open work includes:
 
-### 2. Syndrome-Leech Hybrid ($\Lambda_{24}$)
-By coupling three 8D $E_8$ stages into a virtual 24D **Leech Lattice**, V12 achieves the packing density of the most efficient lattice known to mathematics without the $O(N!)$ search overhead.
-
-### 3. Sparse Syndrome Bit-Stealing (SBSS)
-A "God-Mode" recursive search that only allocates bits to high-error semantic components. This allows 12+ stages of refinement while maintaining a low average BPD.
-
-### 4. Direct Manifold Prediction (DMQ)
-Leveraging the SVD-backbone of the context window to isolate "Semantic Noise" from the "Structural Ground," allowing V12 to compress residuals that other engines simply discard.
-
-## 🚀 Quick Start
-
-### Reproducing Figures
-```bash
-# Install dependencies
-pip install matplotlib numpy seaborn
-
-# Generate all figures
-python scripts/generate_figures.py
-```
-
-This will produce three publication-ready figures:
-- `assets/figure_residual_decay.png` - Shows energy decay across stages
-- `assets/figure_compression_ratio.png` - Compares compression rates
-- `assets/figure_codebook_structure.png` - Visualizes learned orthogonal basis
-
-### Compiling the Manuscript
-```bash
-cd paper
-pdflatex main.tex
-bibtex main
-pdflatex main.tex
-pdflatex main.tex
-```
-
-Output: `main.pdf` - complete research paper in IEEE conference format.
-
-## Validation Status
-
-- Tested on real transformer KV cache tensors (256-dim, 18 layers)
-- Confirmed residual decay on real data (not just synthetic Gaussian)
-- Synthetic benchmark comparisons included
-- End-to-end perplexity validation: pending
-- Hardware/deployment benchmarks: pending
-
-## 📈 Performance Impact
-
-### Memory Savings Calculation
-
-For a typical LLM configuration:
-- Hidden size: 4096
-- Context length: 32,768 tokens
-- Batch size: 1
-- Layers: 32
-
-| Format | KV Cache Size | Memory Saved |
-|--------|--------------|--------------|
-| FP32 (Baseline) | 8 GB | - |
-| FP16 | 4 GB | 50% |
-| **Our Method (Keys)** | **1.5 GB** | **81.25%** |
-| **Our Method (Values)** | **1.25 GB** | **84.375%** |
-
-### Computational Overhead
-- **Encoding**: +2.3% latency (one-time cost per token)
-- **Decoding**: +0.8% latency (per-token generation)
-- **Memory Bandwidth**: 5.3× reduction in KV cache transfers
-
-## 🔍 Key Insights
-
-### Sample Efficiency
-Remarkably, our method converges with only **1,656 total samples** (828 train + 828 calibration). This makes it practical for:
-- Domain-specific fine-tuning scenarios
-- Low-resource deployment environments
-- Rapid prototyping without massive datasets
-
-### Asymmetric Key-Value Compression
-The differential rates reflect fundamental differences in attention components:
-- **Keys (6.0 bpd)**: Higher variance due to similarity computation requirements
-- **Values (5.0 bpd)**: Smoother distributions allowing more aggressive quantization
-
-### Near-Optimal Bit Utilization
-Achieving **7.91/8.0 effective bits** (98.8% efficiency) demonstrates:
-- Minimal entropy coding overhead (only 0.09 bits wasted)
-- Optimal codebook design
-- Performance approaching theoretical compression limits
-
-## 🏗️ Architecture Diagram
-
-```
-Input Vector (256D, FP32)
-         │
-         ▼
-┌─────────────────────────┐
-│  Orthogonal Rotation    │  ← 8 Householder reflections
-│  R ∈ ℝ^(256×256)        │
-└───────────┬─────────────┘
-            │
-            ▼
-┌─────────────────────────┐
-│   QJL Projection        │  ← Rank 80, α = 0.8754
-│   P ∈ {-α,+α}^(80×256)  │
-└───────────┬─────────────┘
-            │
-            ▼
-┌─────────────────────────┐
-│  Stage I Quantizer      │  → 6.0 bpd effective
-│  K=240, Mean=1.227      │
-└───────────┬─────────────┘
-            │ Residual
-            ▼
-┌─────────────────────────┐
-│  Stage II Quantizer     │  → Progressive refinement
-│  K=240, Mean=0.630      │
-└───────────┬─────────────┘
-            │ Residual
-            ▼
-┌─────────────────────────┐
-│  Stage III Quantizer    │  → Mid-frequency details
-│  K=240, Mean=0.043      │
-└───────────┬─────────────┘
-            │ Residual
-            ▼
-┌─────────────────────────┐
-│  Stage IV Quantizer     │  → Fine-grained details
-│  K=240, Mean=-0.547     │
-└───────────┬─────────────┘
-            │
-            ▼
-    Compressed Representation
-    (6.0 bits/dimension)
-```
-
-## 🔬 Limitations & Future Work
-
-> [!WARNING]
-> This research is currently based on **Mathematical Fidelity** and **Vector Retrieval** benchmarks on 1.2M Stanford GloVe vectors.
-
-**Not Yet Investigated:**
-1.  **End-to-End LLM Perplexity (PPL)**: The quantitative effect of V12-Tier compression on downstream reasoning tasks.
-2.  **Direct Hardware Latency**: While O(1) in theory, a production-grade CUDA/Triton implementation is required to measure wall-clock TTFT gains.
-
-**Planned Roadmap:**
-- **Integration**: Full `llama.cpp` GGUF-v3 support.
-- **Acceleration**: Custom kernels for the 24D Syndrome Search.
-
----
-
-## 🏁 Conclusion
-The Higman-Sims V12 engine proves that extreme compression (1.5 BPD) is compatible with bit-exact closure. By pushing the traditional boundaries of scalar quantization, V12 offers a path to doubling the effective context window of existing LLMs without sacrificing the integrity of the semantic "needle."
-
----
-
-## 📚 Global References
-1. **Conway & Sloane**: *Sphere Packings, Lattices and Groups* (The Bible of V12 Geometry).
-2. **Higman & Sims**: *A simple group of order 44,352,000* (The origin of our subspace).
-3. **Google Research**: *TurboQuant* (The baseline we annihilated).
-4. **HS-V12 Team**: *Research Paper: Higman-Sims V12 Quantization* (docs/research/research_paper_v12.md).
-
----
-**Project Status**: High-Fidelity Research Prototype (V12) | **Fully Stable.**
-*Last Updated: April 2026 (The God-Mode Update)*
-
-
----
-
-# Part II: Original Higman-Sims Implicit Spectral Quantizer (Research Prototype)
-
-Research prototype for hybrid vector quantization built around the Higman-Sims graph, its 22-dimensional spectral embedding, and a scalar residual stage.
-
-The main reference implementation for this README is [src/core/v12.py](src/core/v12.py). Later files such as `v16.py` through `v19.py` (in `src/core/`) are exploratory variants and should be treated as experiments rather than settled results.
-
-## Project Status
-
-- This repository is a research prototype, not a production codec.
-- The original `higman_sims_quant.py` implementation uses an implicit Higman-Sims codebook plus scalar residual quantization.
-- The repository contains local benchmark comparisons compared to scalar baseline.
-- Most numbers in this repository come from synthetic Gaussian benchmarks unless a file explicitly says otherwise.
-
-## Why This Approach Is Interesting
-
-This project is still a prototype, but it does have some real strengths:
-
-- The coarse codebook is analytic in the original HS prototype, so there is no learned centroid table to serialize with each compressed payload.
-- Decode is simple: one row lookup per 22D chunk, residual dequantization, then addition.
-- The Higman-Sims embedding is highly symmetric, which makes it a clean and mathematically structured coarse quantizer to study.
-- The design is easy to inspect end to end because the codebook comes from explicit combinatorics rather than opaque training.
-- On the repository's local synthetic benchmarks, the original HS hybrid can outperform a simple scalar baseline on reconstruction quality at the same residual setting.
-- The repository is useful for exploring quality-first quantization ideas before moving to harder benchmarks such as real embeddings, retrieval, or system-level inference workloads.
+- evaluation across more models
+- longer contexts
+- standardized datasets
+- direct comparison against strong baselines under the same protocol
+- actual serialized bitrate instead of entropy-style estimates alone
+- production latency measurements with Triton or another fused runtime
 
 ## Quick Start
 
-### 1. Requirements
-
-- Python 3.10 or higher
-- `pip`
-
-### 2. Install dependencies
+### Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Or install the minimal dependencies directly:
+### Run A Core Reconstruction Check
 
 ```bash
-pip install numpy scipy
+python src/core/v16.py
+python src/core/v19.py
 ```
 
-### 3. Run the original HS benchmark
-
-From the repository root:
+### Run The Kernel Parity Check
 
 ```bash
-python .\src\higman_sims_quant.py
+python tests/integration/validation_parity.py
 ```
 
-If you `cd` into `src`, you can also run:
+### Run End-To-End Cache Evaluation
 
 ```bash
-python .\higman_sims_quant.py
+python src/research/llm_eval.py --model openai-community/gpt2 --engine v19 --target-bpd 2.0 --max-stages 6 --max-length 256 --calibration-length 64 --device cpu
 ```
 
-Expected behavior:
+## Recommended Framing
 
-- the script builds the Golay-derived HS embedding once
-- runs a decode-scaling check
-- prints benchmark tables for several dimensions
+The most accurate way to describe the project today is:
 
-Exact timing and quality numbers will vary by machine, Python version, and random seed.
+- a working research prototype
+- promising early end-to-end results
+- strong reconstruction behavior in local experiments
+- not yet a settled production system
+- not yet proven to be best in class
 
-### 4. Use it in your own code
+## Notes
 
-From the repository root:
+- Some older scripts and class names still use more dramatic internal naming from earlier iterations. The public-facing docs are being revised toward more neutral language.
+- The TeX manuscript under `paper/` may still contain older wording if it is being edited separately.
 
-```python
-from src.core.v12 import HybridQuantizer
-import numpy as np
-
-qz = HybridQuantizer(dim=768, bits_residual=2, verbose=True)
-
-vectors = np.random.randn(100, 768).astype(np.float64)
-
-compressed = qz.encode(vectors)
-reconstructed = qz.decode(compressed)
-
-mse = np.mean((vectors - reconstructed) ** 2)
-print(f"MSE: {mse:.4f}")
-print(f"Bits per vector: {qz.bits_per_vector()}")
-print(f"Compression ratio: {qz.compression_ratio():.2f}x")
-print(f"Overhead: {qz.overhead_bits()} bits")
-```
-
-### 5. Use the raw 22D quantizer directly
-
-```python
-from src.core.v12 import HSQuantizer
-import numpy as np
-
-qz = HSQuantizer(bits_residual=2, verbose=True)
-
-x = np.random.randn(50, 22).astype(np.float64)
-
-ids, residual_codes = qz.encode(x)
-x_hat = qz.decode(ids, residual_codes)
-
-print(f"Vertex ID range: {ids.min()}..{ids.max()}")
-print(f"Bits per 22D vector: {qz.bits_per_vector()}")
-```
-
-## What This Project Is
-
-This project explores a hybrid quantization idea:
-
-1. Use a fixed analytic 22D codebook derived from the Higman-Sims graph as a coarse quantizer.
-2. Quantize only the residual error with a small scalar code.
-
-The codebook is implicit rather than learned. Encoder and decoder both reconstruct it from the same mathematical construction, so there is no transmitted learned-codebook payload in the original HS prototype.
-
-This repository is about:
-
-- analytic codebooks
-- graph- and design-based geometry
-- compact reconstruction
-- bitrate accounting
-- decode simplicity
-
-This repository's performance is currently compared to scalar baseline.
-
-## High-Level Idea
-
-Instead of quantizing each dimension independently from the start, the HS prototype first snaps a 22D input vector to the nearest point in a fixed 100-point spherical code derived from the Higman-Sims graph. The residual error is then quantized with a scalar residual code.
-
-The motivation is simple:
-
-- if the coarse codebook already captures a useful part of the vector geometry
-- the remaining residual is smaller
-- and the scalar stage has less work to do
-
-## Technical Overview
-
-### Step 1: Extended Golay code
-
-The construction starts from the binary extended Golay code `[24, 12, 8]`.
-
-- It has `2^12 = 4096` codewords.
-- Exactly `759` of them have Hamming weight `8`.
-- Those weight-8 codewords are the octads of the large Witt design `S(5, 8, 24)`.
-
-In the implementation this is generated directly from a fixed systematic generator matrix.
-
-### Step 2: Steiner system `S(3, 6, 22)`
-
-Fix two points in the `S(5, 8, 24)` design, then restrict to octads containing both of them. Removing those fixed points yields `77` six-element blocks on the remaining `22` points.
-
-That gives the Steiner system `S(3, 6, 22)` used by the next stage of the construction.
-
-### Step 3: Higman-Sims graph
-
-From the `S(3, 6, 22)` blocks, the code builds the Higman-Sims graph with `100` vertices:
-
-- `1` special vertex
-- `22` point vertices
-- `77` block vertices
-
-The resulting graph is the strongly regular graph `srg(100, 22, 0, 6)`.
-
-### Step 4: Spectral embedding
-
-The Higman-Sims adjacency matrix has three eigenvalues:
-
-- `22` with multiplicity `1`
-- `2` with multiplicity `77`
-- `-8` with multiplicity `22`
-
-The implementation uses the `-8` eigenspace to build a `100 x 22` embedding matrix. Each row becomes one coarse codebook vector.
-
-This gives a highly symmetric 22D spherical configuration that is useful as an implicit coarse codebook.
-
-### Step 5: Encoding a 22D vector
-
-For one 22D input vector `x`:
-
-1. Compute all scores `x @ V.T`.
-2. Pick the nearest HS vertex ID.
-3. Use that row of `V` as the coarse approximation.
-4. Compute the residual `x - coarse`.
-5. Quantize the residual with `bits_residual` bits per dimension.
-
-The output is:
-
-- one 7-bit vertex ID
-- plus residual codes
-
-### Step 6: Decoding
-
-Decoding a 22D chunk consists of:
-
-1. one row lookup from the fixed `100 x 22` embedding matrix
-2. residual dequantization
-3. vector addition
-
-For higher dimensions, the implementation pads to a multiple of `22`, splits into chunks, and applies the same process per chunk.
-
-## What "O(1) decode" Means Here
-
-In this repository, `O(1)` decode means constant-time lookup with respect to the codebook size for one 22D chunk:
-
-- decode does not search all 100 vertices
-- it simply reads the row identified by the stored ID
-
-Decode still scales linearly with:
-
-- batch size
-- number of chunks
-- total dimension
-
-So for full vectors, decode is constant per chunk and linear in the number of chunks.
-
-## Original HS Prototype Numbers
-
-For the original `higman_sims_quant.py` prototype with `bits_residual = 2`:
-
-| Dimension | Bits/vector | Compression ratio |
-| --- | ---: | ---: |
-| 22 | 51 | 13.80x |
-| 64 | 153 | 13.39x |
-| 768 | 1785 | 13.77x |
-| 4096 | 9537 | 13.74x |
-
-These are properties of the original HS chunked codec in this repository.
-
-## Benchmark Interpretation
-
-The original script prints a comparison compared to scalar baseline.
-
-The correct way to read that comparison is:
-
-- it is a local benchmark inside this repository
-- it is useful for internal iteration
-
-So a safe summary is:
-
-- the original HS prototype can look better than a simple local scalar baseline on some synthetic reconstruction metrics
-
-## Why the Codebook Overhead Is Called "Implicit"
-
-In the original HS prototype, the codebook is not learned from data and is not serialized with the compressed payload. Instead, both encoder and decoder rebuild it from the same deterministic construction:
-
-Golay generator matrix -> octads -> `S(3, 6, 22)` blocks -> HS adjacency matrix -> eigendecomposition -> 22D embedding
-
-That is why the original implementation describes the coarse codebook as implicit.
-
-## Project Structure
-
-```text
-src/
-  core/
-    v12.py                   Original HS implicit spectral quantizer
-    v16.py                   Follow-up experiment
-    v17.py                   Equal-bitrate diagnostics
-    v18.py                   Direction-first variant
-    v19.py                   E8-based reference prototype
-
-tests/
-  *.test.py                  Construction and graph checks
-
-docs/
-  *.md / *.html             Historical notes and benchmark artifacts
-```
-
-## Main Classes
-
-### `HSQuantizer`
-
-Core 22D quantizer.
-
-- builds the HS embedding
-- encodes `(N, 22)` arrays into IDs plus residual codes
-- decodes by row lookup plus residual reconstruction
-
-### `HybridQuantizer`
-
-Wrapper for arbitrary dimension.
-
-- pads to a multiple of 22
-- chunks the input
-- applies `HSQuantizer` to each chunk
-
-### `CompressedVector`
-
-Named tuple holding:
-
-- `ids`
-- `codes`
-- original dimension
-- batch size
-
-## Known Limitations
-
-- The main benchmark is synthetic Gaussian data.
-- The original encoder still uses a direct nearest-vertex search over all 100 HS vertices.
-- Chunking high-dimensional vectors into independent 22D blocks ignores cross-chunk correlation.
-- The residual stage is still a simple scalar quantizer.
-- Later experimental versions in this repository show that bitrate accounting must be handled very carefully.
-
-## Suggested Next Steps
-
-- evaluate on real embeddings or geometry data
-- test retrieval metrics and application-level metrics
-- improve search speed on the coarse codebook
-- improve the residual stage
-- establish formal benchmarks compared to scalar baseline if a paper-level claim is needed
-
-## Public Release Checklist
-
-If you are deciding whether to make the repository public, use [legal/PUBLIC_RELEASE_CHECKLIST.md](legal/PUBLIC_RELEASE_CHECKLIST.md).
-
-## Legal
-
-- License: [legal/LICENSE](legal/LICENSE)
-- Disclaimer: [legal/DISCLAIMER.md](legal/DISCLAIMER.md)
-- Terms and Conditions: [legal/TERMS_AND_CONDITIONS.md](legal/TERMS_AND_CONDITIONS.md)
-
-## References
-
-1. D. G. Higman and C. C. Sims, "A simple group of order 44,352,000."
-2. A. E. Brouwer, A. M. Cohen, and A. Neumaier, *Distance-Regular Graphs*.
-3. P. Delsarte, "An algebraic approach to the association schemes of coding theory."
-4. J. H. Conway and N. J. A. Sloane, *Sphere Packings, Lattices and Groups*.
-5. Previous scalar quantization methods, for context only; this repository focuses on performance compared to scalar baseline.
-
-## License
-
-This repository is licensed under the MIT License. See [legal/LICENSE](legal/LICENSE).
+Last updated: June 23, 2026.

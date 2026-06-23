@@ -27,16 +27,22 @@ class HybridLatticeEngine(nn.Module):
         # In production, these would be stored as Lattice Indices + Residuals.
         self.register_buffer("weight_lattices", torch.zeros(out_features, in_features))
         self.register_buffer("weight_scales", torch.ones(out_features, 1))
+        self.register_buffer("bias", torch.zeros(out_features))
         
         # 2. Dynamic Lattice Memory (Continual Learning)
         # Provides "Fast-Knowledge" overrides or supplementary context.
         self.memory = LatticeMemory(dim=in_features, capacity=memory_capacity)
 
-    def load_from_llama(self, llama_weight: torch.Tensor):
+    def load_from_llama(self, llama_weight: torch.Tensor, llama_bias: torch.Tensor | None = None):
         """
         Convert a standard Llama weight matrix to Hybrid-Lattice format.
         """
         print(f"Compressing {self.out_features}x{self.in_features} weights to {self.target_bpd} BPD...")
+        llama_weight = llama_weight.detach().to(
+            device=self.weight_lattices.device,
+            dtype=self.weight_lattices.dtype,
+        )
+
         # 1. Normalize and Quantize weights to E8 Manifold
         rms = llama_weight.std() + 1e-12
         self.weight_scales.copy_(rms)
@@ -47,6 +53,17 @@ class HybridLatticeEngine(nn.Module):
             self.weight_lattices.copy_(triton_e8_quantize(norm_weights * 100.0) / 100.0)
         else:
             self.weight_lattices.copy_(fast_e8_quantize_torch(norm_weights * 100.0) / 100.0)
+
+        if llama_bias is None:
+            self.bias.zero_()
+        else:
+            self.bias.copy_(
+                llama_bias.detach().to(
+                    device=self.bias.device,
+                    dtype=self.bias.dtype,
+                )
+            )
+
         print(f"Static compression complete (Triton: {self.use_triton}).")
 
     def forward(self, x: torch.Tensor, use_spectral_scout=True):
@@ -69,6 +86,7 @@ class HybridLatticeEngine(nn.Module):
         
         # 3. Standard Matmul path
         out = torch.matmul(x, w_dequant.t())
+        out = out + self.bias
         
         # 4. Lattice Memory Override (Phase 2 Innovation)
         # If the input matches a high-SNR 'New Fact' in the lattice memory,

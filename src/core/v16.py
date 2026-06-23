@@ -153,6 +153,6 @@ if __name__ == "__main__":
     print(f"Real Entropy BPD: {bpd:.2f}")
     
     if snr > 140:
-        print("✅ SUCCESS: Singularity threshold reached (>140dB).")
+        print("[OK] Singularity threshold reached (>140dB).")
     else:
-        print("⚠️ WARNING: SNR below target singularity threshold.")
+        print("[WARN] SNR below target singularity threshold.")
